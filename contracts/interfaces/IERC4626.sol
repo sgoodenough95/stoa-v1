@@ -53,6 +53,13 @@ interface IERC4626 is IERC20 {
         afterDeposit(assets, shares);
     }*/
 
+    /**
+     * @dev Addition for depositing on behalf of depositor.
+     */
+    function deposit(uint256 assets, address receiver, address depositor)
+        external
+        returns (uint256 shares);
+
     function mint(uint256 shares, address receiver)
         external
         returns (uint256 assets); /* {

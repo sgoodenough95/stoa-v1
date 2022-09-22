@@ -3,6 +3,7 @@ pragma solidity ^0.8.17;
 
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./interfaces/IController.sol";
+import "./interfaces/ISafeManager.sol";
 
 /**
  * @dev
@@ -16,16 +17,19 @@ contract SafeOperations {
 
     address safeManager;
 
+    ISafeManager safeManagerContract;
+
     mapping(address => address) tokenToController;
 
-    mapping(address => bool) isStoaToken;
+    mapping(address => bool) isReceiptToken;
 
     // Reentrancy Guard logic.
     uint256 private constant _NOT_ENTERED = 1;
     uint256 private constant _ENTERED = 2;
     uint256 private _status = _NOT_ENTERED;
 
-    modifier nonReentrant() {
+    modifier nonReentrant()
+    {
         // On the first call to nonReentrant, _notEntered will be true
         require(_status != _ENTERED, "ReentrancyGuard: reentrant call");
 
@@ -43,9 +47,11 @@ contract SafeOperations {
      * @dev Returns the controller for a given inputToken.
      * @return address The address of the target controller.
      */
-    function getController(
-        address _inputToken
-    ) external view returns (address) {
+    function getController(address _inputToken)
+        external
+        view
+        returns (address)
+    {
         return tokenToController[_inputToken];
     }
 
@@ -53,33 +59,65 @@ contract SafeOperations {
      * @dev
      *  Transfers inputTokens from caller to target Controller (unless inputToken is a Stoa token,
      *  in which case transfers inputTokens (Stoa tokens) directly to SafeManager).
+     *  NEED TO CONSIDER MINTING/REDEMPTION FEE DYNAMIC W.R.T. SAFES.
      * @notice User-facing function for opening a Safe.
      * @param _inputToken The address of the inputToken. Must be supported.
      * @param _amount The amount of inputTokens to deposit.
      */
-    function openSafe(
-        address _inputToken,
-        uint _amount
-    ) external {
-        
-        if (isStoaToken[_inputToken] == false) {
+    function openSafe(address _inputToken, uint _amount)
+        external
+    {
+        address _receiptToken;
+
+        if (isReceiptToken[_inputToken] == false) {
+            // First, check if a Controller exists for the inputToken.
             require(tokenToController[_inputToken] != address(0), "SafeOps: Controller not found");
 
             address _targetController = tokenToController[_inputToken];
 
             IController targetController = IController(_targetController);
 
-            targetController.deposit(msg.sender, _amount);
-        } else {
-            // If inputToken is a Stoa token.
+            _receiptToken = targetController.getReceiptToken();
+
+            uint amount = targetController.deposit(msg.sender, _amount, true);
+
+            safeManagerContract.openSafe(msg.sender, _receiptToken, amount, 0);
+        }
+        else {
+            // If inputToken is activeToken.
             IERC20 inputToken = IERC20(_inputToken);
 
             // Approve _inputToken first before initiating transfer
             SafeERC20.safeTransferFrom(inputToken, msg.sender, safeManager, _amount);
+
+            _receiptToken = address(_inputToken);
+
+            safeManagerContract.openSafe(msg.sender, _receiptToken, _amount, _amount);
         }
+    }
 
-        // Set Safe params in SafeManager
+    function depositToSafe(address _inputToken, uint _amount)
+        external
+    {
 
+    }
+
+    function withdrawFromSafe(address _inputToken, uint _amount)
+        external
+    {
+        
+    }
+
+    function borrow(uint _amount)
+        external
+    {
+
+    }
+
+    function repay(uint _amount)
+        external
+    {
+        
     }
 
     /**

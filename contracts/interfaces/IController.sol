@@ -14,5 +14,7 @@ pragma solidity ^0.8.17;
  */
 interface IController {
 
-    function deposit(address _depositor, uint _amount) external returns (bool);
+    function deposit(address _depositor, uint _amount, bool _activated) external returns (uint mintAmount);
+
+    function getReceiptToken() external view returns (address receiptToken);
 }

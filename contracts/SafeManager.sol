@@ -21,12 +21,23 @@ contract SafeManager {
     ISafeOperations safeOperationsContract = ISafeOperations(safeOperations);
 
     /**
-     * @dev Safe owner => inputToken => Safe.
+     * @dev
+     *  Counter that increments each time an address opens a Safe.
+     *  Enables us to differentiate between Safes of the same user that
+     *  have the same receiptToken but not debtToken.
+     *  E.g., Safe 1: BTCST => USDSTu, Safe 2: BTCST => ETHSTu.
+     *  Reason being, for now, only allow one debtToken per Safe.
      */
-    mapping(address => mapping(address => Safe)) public safe;
+    mapping(address => uint) currentSafeIndex;
+
+    /**
+     * @dev Safe owner => safeIndex => Safe.
+     */
+    mapping(address => mapping(uint => Safe)) public safe;
 
     /**
      * @dev receiptToken => rebasingCreditsPerToken.
+     *  Motivation in having is to update Safe bals upon rebase (?)
      */
     mapping(address => uint) public rebasingCreditsPerReceiptToken;
 
@@ -49,14 +60,15 @@ contract SafeManager {
 
     // One Safe supports one type of receiptToken and one type of debtToken.
     struct Safe {
-        // E.g., USDST
-        address receiptToken;
+        // // E.g., USDST
+        // address receiptToken;
         // E.g., USDSTu
+        // Might not necessarily know this when opening a Safe.
         address debtToken;
-        bool isRebasing;
-        // Balance of the receiptToken.
-        // For rebasing tokens, stores creditBalance. For non-rebasing, stores token balance.
+        // receiptToken creditBalance;
         uint bal;
+        // Increments only if depositing activeToken.
+        uint mintFeeApplied;
         // Balance of the debtToken.
         uint debt;
         // Amount of receiptTokens locked as collateral.
@@ -82,25 +94,40 @@ contract SafeManager {
 
     }
 
+    function openSafe(address _owner, address _receiptToken, uint _amount, uint _mintFeeApplied)
+        external
+        onlySafeOps
+    {
+        // First, find the user's current index.
+        uint _index = currentSafeIndex[_owner];
+
+        // Now set Safe params.
+        safe[_owner][_index].bal = _amount;
+        safe[_owner][_index].mintFeeApplied = _mintFeeApplied;
+        safe[_owner][_index].index = _index;
+        safe[_owner][_index].status = Status(1);
+
+        currentSafeIndex[_owner] += 1;
+    }
+
     /**
-     * @dev Safe balance setter, called only by SafeOperations.
+     * @dev Safe balance setter, called only by SafeOperations
      * @param _owner The owner of the Safe.
      * @param _receiptToken The receiptToken of the Safe (usually rebasing w.r.t yield).
      * @param _amount The amount of receiptTokens.
      * @param _add Boolean to indicate if _amount subtracts or adds to Safe balance.
      */
-    function adjustSafeBal(
-        address _owner,
-        address _receiptToken,
-        uint _amount,
-        bool _add
-    ) external onlySafeOps {
+    function adjustSafeBal(address _owner, address _receiptToken, uint _amount, bool _add)
+        external
+        onlySafeOps
+    {
         if (_add == true) {
             safe[_owner][_receiptToken].bal += _amount;
         } else {
             require(safe[_owner][_receiptToken].bal >= _amount, "SafeManager: Safe cannot have negative balance");
             // Insert logic to handle locked collateral.
         }
+
     }
 
     /**
