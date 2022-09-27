@@ -2,7 +2,7 @@
 pragma solidity ^0.8.17;
 
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 // import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "./interfaces/IERC4626.sol";
 import "./interfaces/IVaultWrapper.sol";
@@ -17,34 +17,29 @@ import "./interfaces/ISafeManager.sol";
  */
 
 /**
- * @title Stable Controller
+ * @title Controller
  * @notice
- *  Controller contract that directs stablecoins to yield venues (vaults).
+ *  Controller contract that directs inputTokens to a yield venue (vault).
  *  If yield has been earned, Keepers can call 'rebase()' and the Controller's
  *  activeToken will adjust user balances accordingly.
  * @dev
  *  Interfaces with vault.
- *  Calls mint/burn function of USDST contract upon deposit/withdrawal.
- *  Can also provide one-way conversion of supported stables/USDST to USDSTu.
- *  Calls 'changeSupply()' of USDST contract upon successful rebase.
+ *  Calls mint/burn function of activeToken contract upon deposit/withdrawal.
+ *  Can also provide one-way conversion of inputToken/activeToken to unactiveToken.
+ *  Calls 'changeSupply()' of activeToken contract upon successful rebase.
  *  Drips (makes yield available) to Activator contract.
  */
-contract StableController is Ownable {
+contract Controller is Ownable {
 
     address safeOperations;
     address safeManager;
     address activeToken;
     address unactiveToken;
 
-    address public constant DAIAddress =
-        0x6B175474E89094C44Da98b954EedeAC495271d0F;
-    address public constant USDCAddress =
-        0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
-
     /**
      * @dev
      *  Only accept one inputToken to begin with.
-     *  Need to later adapt for stablecoins.
+     *  Need to later adapt.
      */
     IERC20 public inputTokenContract;
 
@@ -110,6 +105,12 @@ contract StableController is Ownable {
     uint256 private constant _ENTERED = 2;
     uint256 private _status = _NOT_ENTERED;
 
+    modifier onlySafeOps()
+    {
+        require(msg.sender == safeOperations, "SafeManager: Only SafeOps can call");
+        _;
+    }
+
     modifier nonReentrant()
     {
         // On the first call to nonReentrant, _notEntered will be true
@@ -128,21 +129,37 @@ contract StableController is Ownable {
     /**
      * @dev Set initial values and approvals.
      */
-    constructor() // address _vault,
-    // address _stoaToken,
-    // address _inputTokenContract
+    constructor(
+        address _vault,
+        address _inputToken,
+        address _activeToken,
+        address _unactiveToken
+    )
     {
-        // vault = IERC4626(_vault);
-        // stoaToken = IERC20(_stoaToken);
-        // IActivated = IStoaStable(_stoaToken);
-        // adrInputTokenContract = _inputTokenContract;
-        // inputTokenContract = IERC20(_inputTokenContract);
-        // token.approve(address(vault), type(uint).max);
+        vault = IERC4626(_vault);
+
+        activeToken = _activeToken;
+
+        unactiveToken = _unactiveToken;
+
+        activeTokenContract = IActivated(activeTokenContract);
+
+        unactiveTokenContract = IUnactivated(unactiveTokenContract);
+
+        activeTokenContractERC20 = IERC20(activeToken);
+
+        unactiveTokenContractERC20 = IERC20(unactiveToken);
+
+        inputTokenContract = IERC20(_inputToken);
+
+        activeTokenContractERC20.approve(address(this), type(uint).max);
+
+        inputTokenContract.approve(address(vault), type(uint).max);
     }
 
     /**
      * @notice
-     *  Deposits dollar-pegged stablecoin into vault and issues Stoa (receipt) tokens.
+     *  Deposits inputTokens into vault and issues Stoa (receipt) tokens.
      *  (receiptTokens may be activeTokens or unactiveTokens).
      * @dev
      *  Callable either directly from user (custodial) or SafeOperations (non-custodial).
@@ -184,21 +201,30 @@ contract StableController is Ownable {
         uint _mintFee = computeMintFee(_amount);
         mintAmount = _amount - _mintFee;
 
-        // E.g., DAI => USDST.
+        // E.g., DAI => USDSTa.
         if (_activated == true) {
             if (msg.sender == safeOperations) {
-                // Do not apply mintFee if opening a Safe.
                 activeTokenContract.mint(safeManager, _amount);
+
+                // Do not apply mintFee if opening a Safe.
                 mintAmount = _amount;
             } else {
                 activeTokenContract.mint(msg.sender, mintAmount);
+
                 activeTokenContract.mint(address(this), mintFee);
             }
 
-        // E.g., DAI => USDSTu.
+        // E.g., DAI => USDST.
         } else {
             activeTokenContract.mint(address(this), _amount);
+
+            // The user's unactiveTokens are backed by the activeTokens minted
+            // to the Controller.
+            // This enables the Controller to engage in actions such as depositing
+            // to the Stability Pool (with the mintFee plus yield earned).
             unactiveTokenContract.mint(msg.sender, mintAmount);
+
+            // Unspendable tokens used to back unactiveTokens.
             activeTokenBackingReserve += mintAmount;
         }
     }
@@ -236,7 +262,9 @@ contract StableController is Ownable {
             _amount
         );
 
+        // Controller captures mintFee amount + future yield earned.
         activeTokenBackingReserve += mintAmount;
+
         unactiveTokenContract.mint(msg.sender, mintAmount);
     }
 
@@ -250,7 +278,7 @@ contract StableController is Ownable {
      * @param _withdrawer The address to receive inputTokens.
      * @param _amount The amount of activeTokens transferred by the caller.
      */
-    function withdraw(address _withdrawer, uint256 _amount)
+    function withdraw(address _withdrawer, uint _amount)
         external
         nonReentrant
         returns (uint amount)
@@ -284,6 +312,50 @@ contract StableController is Ownable {
         amountWithdrawn += _amount;
     }
 
+    function adminWithdraw(uint _amount, bool _max)
+        external
+        onlyOwner
+    {
+        uint _shares;
+        if (_max == false) {
+            _shares = vault.convertToShares(_amount);
+            amountWithdrawn += _amount;
+        }
+        else {
+            uint maxAmount = totalValue();
+            _shares = vault.convertToShares(maxAmount);
+            amountWithdrawn += maxAmount;
+        }
+        vault.redeem(_shares, address(this), address(this));
+    }
+
+    /**
+     * @dev
+     *  Separate withdraw function to handle redemptionFee logic.
+     * @notice
+     *  Function to withdraw inputTokens (e.g., DAI) from Safe.
+     */
+    function withdrawInputTokensFromSafe(address _withdrawer, uint _amount, uint _redemptionFeeApplied)
+        external
+        onlySafeOps
+    {
+        // Safe Manager transfers corresponding receiptTokens.
+        // Controller retains receiptTokens for which redemption fees have not been applied.
+    }
+
+    /**
+     * @dev
+     *  Separate withdraw function to handle mintFee logic.
+     * @notice
+     *  Function to withdraw receiptTokens (e.g., USDSTa) from Safe.
+     */
+    function withdrawReceiptTokensFromSafe(address _withdrawer, uint _amount, uint _mintFeeApplied)
+        external
+        onlySafeOps
+    {
+        // Safe Manager transfers receiptTokens for which mint fees have not been applied.
+    }
+
     function rebase()
         external
         returns (uint yield, uint userYield, uint stoaYield)
@@ -300,13 +372,17 @@ contract StableController is Ownable {
 
         // Update supply accordingly. Take 10% cut of yield.
         if (vaultValue > activeTokenContractSupply) {
+
+            // What logic here (?)
             yield = vaultValue - activeTokenContractSupply;
             userYield = (yield / 10_000) * (10_000 - mgmtFee);
             stoaYield = yield - userYield;
 
+            // We want the activeToken supply to mirror the size of the vault.
             activeTokenContract.changeSupply(vaultValue);
         }
 
+        // Not sure if needed, as SafeManager can get balance from activeToken contract (?)
         safeManagerContract.updateRebasingCreditsPerToken(activeToken);
     }
 
@@ -343,6 +419,7 @@ contract StableController is Ownable {
         receiptToken = activeToken;
     }
 
+    // Needs amending if storing activeToken in Controller for Safes.
     function getExcessActiveTokenBalance()
         public
         view
@@ -350,5 +427,17 @@ contract StableController is Ownable {
     {
         excessActiveTokenBalance =
             activeTokenContractERC20.balanceOf(address(this)) - activeTokenBackingReserve;
+    }
+
+    function adjustMintFee(uint _newFee) external {
+        mintFee = _newFee;
+    }
+
+    function adjustRedemptionFee(uint _newFee) external {
+        redemptionFee = _newFee;
+    }
+
+    function adjustMgmtFee(uint _newFee) external {
+        mgmtFee = _newFee;
     }
 }

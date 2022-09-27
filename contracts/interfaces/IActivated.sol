@@ -12,6 +12,8 @@ interface IActivated {
     function mint(address _account, uint _amount) external;
 
     function burn(address _account, uint _amount) external;
+
+    function convertToAssets(uint _creditBalance) external view returns (uint);
     
     function changeSupply(uint _newTotalSupply) external returns (uint);
 

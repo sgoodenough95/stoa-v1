@@ -60,8 +60,9 @@ contract SafeManager {
 
     // One Safe supports one type of receiptToken and one type of debtToken.
     struct Safe {
+        address owner;
         // // E.g., USDST
-        // address receiptToken;
+        address receiptToken;
         // E.g., USDSTu
         // Might not necessarily know this when opening a Safe.
         address debtToken;
@@ -69,6 +70,7 @@ contract SafeManager {
         uint bal;
         // Increments only if depositing activeToken.
         uint mintFeeApplied;
+        uint redemptionFeeApplied;
         // Balance of the debtToken.
         uint debt;
         // Amount of receiptTokens locked as collateral.
@@ -77,24 +79,46 @@ contract SafeManager {
         Status status;
     }
 
-    modifier onlySafeOps() {
+    modifier onlySafeOps()
+    {
         require(msg.sender == safeOperations, "SafeManager: Only SafeOps can call");
         _;
     }
 
-    /**
-     * @notice Function to retrieve Safe data.
-     * @return
-     *  Balance of the Safe adjusted to tokens and parameters from Safe struct.
-     */
-    function getSafeData(
-        address _owner,
-        address _inputToken
-    ) external view returns (uint, Safe memory) {
-
+    constructor(
+        address _safeOperations
+    ) {
+        safeOperations = _safeOperations;
     }
 
-    function openSafe(address _owner, address _receiptToken, uint _amount, uint _mintFeeApplied)
+    /**
+     * @notice Function to verify Safe's receiptToken.
+     * @return bool Expected receiptToken is correct.
+     */
+    function getSafe(
+        address _owner,
+        uint _index
+    ) external view returns (address, address, address, uint, uint, uint, uint, uint, uint) {
+        return (
+            safe[_owner][_index].owner,
+            safe[_owner][_index].receiptToken,
+            safe[_owner][_index].debtToken,
+            safe[_owner][_index].bal,
+            safe[_owner][_index].mintFeeApplied,
+            safe[_owner][_index].redemptionFeeApplied,
+            safe[_owner][_index].debt,
+            safe[_owner][_index].locked,
+            uint(safe[_owner][_index].status)
+        );
+    }
+
+    function openSafe(
+        address _owner,
+        address _receiptToken,
+        uint _amount,
+        uint _mintFeeApplied,
+        uint _redemptionFeeApplied
+    )
         external
         onlySafeOps
     {
@@ -102,8 +126,11 @@ contract SafeManager {
         uint _index = currentSafeIndex[_owner];
 
         // Now set Safe params.
+        safe[_owner][_index].owner = _owner;
+        safe[_owner][_index].receiptToken = _receiptToken;
         safe[_owner][_index].bal = _amount;
         safe[_owner][_index].mintFeeApplied = _mintFeeApplied;
+        safe[_owner][_index].redemptionFeeApplied = _redemptionFeeApplied;
         safe[_owner][_index].index = _index;
         safe[_owner][_index].status = Status(1);
 
@@ -113,21 +140,34 @@ contract SafeManager {
     /**
      * @dev Safe balance setter, called only by SafeOperations
      * @param _owner The owner of the Safe.
-     * @param _receiptToken The receiptToken of the Safe (usually rebasing w.r.t yield).
+     * @param _index The Safe's index.
      * @param _amount The amount of receiptTokens.
      * @param _add Boolean to indicate if _amount subtracts or adds to Safe balance.
      */
-    function adjustSafeBal(address _owner, address _receiptToken, uint _amount, bool _add)
+    function adjustSafeBal(
+        address _owner,
+        uint _index,
+        address _receiptToken,
+        uint _amount,
+        bool _add,
+        uint _mintFeeApplied,
+        uint _redemptionFeeApplied
+    )
         external
         onlySafeOps
     {
+        require(safe[_owner][_index].receiptToken == _receiptToken, "SafeManager: receiptToken mismatch");
         if (_add == true) {
-            safe[_owner][_receiptToken].bal += _amount;
+            safe[_owner][_index].bal += _amount;
+            safe[_owner][_index].mintFeeApplied += _mintFeeApplied;
+            safe[_owner][_index].redemptionFeeApplied += _redemptionFeeApplied;
         } else {
-            require(safe[_owner][_receiptToken].bal >= _amount, "SafeManager: Safe cannot have negative balance");
-            // Insert logic to handle locked collateral.
+            require(safe[_owner][_index].bal >= _amount, "SafeManager: Safe cannot have negative balance");
+            // When debtTokens are issued, it moves the proportionate amount from 'bal' to 'locked'.
+            // Therefore, only consider 'bal' for now.
+            safe[_owner][_index].bal -= _amount;
+            // Fees
         }
-
     }
 
     /**
@@ -163,6 +203,11 @@ contract SafeManager {
         uint _num
     ) external onlySafeOps {
         safe[_owner][_inputToken].status = Status(_num);
+    }
+
+    function approveToken(address _token, address _spender) external {
+        IERC20 token = IERC20(_token);
+        token.approve(_spender, type(uint).max);
     }
 
     /**

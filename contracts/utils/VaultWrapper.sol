@@ -128,6 +128,14 @@ contract VaultWrapper is ERC20, IVaultWrapper, IERC4626 {
         return yVault.totalAssets();
     }
 
+    function getPricePerShare()
+        public
+        view
+        returns (uint256)
+    {
+        return yVault.pricePerShare();
+    }
+
     function convertToShares(uint256 assets)
         public
         view
