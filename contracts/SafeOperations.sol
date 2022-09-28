@@ -22,13 +22,13 @@ contract SafeOperations {
 
     mapping(address => address) public tokenToController;
 
-    mapping(address => bool) public isReceiptToken;
+    mapping(address => bool) public isActiveToken;
 
-    mapping(address => address) public receiptToInputToken;
+    mapping(address => address) public activeToInputToken;
 
     struct WithdrawCache {
         address owner;
-        address receiptToken;
+        address activeToken;
         address debtToken;
         uint bal;
         uint mintFeeApplied;
@@ -59,7 +59,9 @@ contract SafeOperations {
     }
 
     /**
-     * @dev Returns the controller for a given inputToken.
+     * @dev
+     *  Returns the controller for a given inputToken.
+     *  TBD whether this is handled by a separate Router contract.
      * @return address The address of the target controller.
      */
     function getController(address _inputToken)
@@ -82,7 +84,7 @@ contract SafeOperations {
         external
     {
         // E.g., _inputToken = DAI.
-        if (isReceiptToken[_inputToken] == false) {
+        if (isActiveToken[_inputToken] == false) {
             // First, check if a Controller exists for the inputToken.
             require(tokenToController[_inputToken] != address(0), "SafeOps: Controller not found");
 
@@ -90,11 +92,17 @@ contract SafeOperations {
 
             IController targetController = IController(_targetController);
 
-            address _receiptToken = targetController.getReceiptToken();
+            address _activeToken = targetController.getActiveToken();
 
             targetController.deposit(msg.sender, _amount, true);
 
-            safeManagerContract.openSafe(msg.sender, _receiptToken, _amount, 0, _amount);
+            safeManagerContract.openSafe({
+                _owner: msg.sender,
+                _activeToken: _activeToken,
+                _amount: _amount,
+                _mintFeeApplied: 0,
+                _redemptionFeeApplied: _amount
+            });
         }
         // E.g., _inputToken = USDST.
         else {
@@ -103,8 +111,14 @@ contract SafeOperations {
             // Approve _inputToken first before initiating transfer
             SafeERC20.safeTransferFrom(inputToken, msg.sender, safeManager, _amount);
 
-            // _inputToken is already a receiptToken (e.g., USDST).
-            safeManagerContract.openSafe(msg.sender, _inputToken, _amount, _amount, 0);
+            safeManagerContract.openSafe({
+                _owner: msg.sender,
+                // _inputToken is already a activeToken (e.g., USDSTa).
+                _activeToken: _inputToken,
+                _amount: _amount,
+                _mintFeeApplied: _amount,
+                _redemptionFeeApplied: 0
+            });
         }
     }
 
@@ -112,18 +126,26 @@ contract SafeOperations {
         external
     {
         // E.g., _inputToken = DAI.
-        if (isReceiptToken[_inputToken] == false) {
+        if (isActiveToken[_inputToken] == false) {
             require(tokenToController[_inputToken] != address(0), "SafeOps: Controller not found");
 
             address _targetController = tokenToController[_inputToken];
 
             IController targetController = IController(_targetController);
 
-            address _receiptToken = targetController.getReceiptToken();
+            address _activeToken = targetController.getActiveToken();
 
             targetController.deposit(msg.sender, _amount, true);
 
-            safeManagerContract.adjustSafeBal(msg.sender, _index, _receiptToken, _amount, true, 0, _amount);
+            safeManagerContract.adjustSafeBal({
+                _owner: msg.sender,
+                _index: _index,
+                _activeToken: _activeToken,
+                _amount: _amount,
+                _add: true,
+                _mintFeeApplied: 0,
+                _redemptionFeeApplied: _amount
+            });
         }
         // E.g., _inputToken = USDSTa.
         else {
@@ -132,7 +154,15 @@ contract SafeOperations {
             // Approve _inputToken first before initiating transfer
             SafeERC20.safeTransferFrom(inputToken, msg.sender, safeManager, _amount);
 
-            safeManagerContract.adjustSafeBal(msg.sender, _index, _inputToken, _amount, true, _amount, 0);
+            safeManagerContract.adjustSafeBal({
+                _owner: msg.sender,
+                _index: _index,
+                _activeToken: _inputToken,
+                _amount: _amount,
+                _add: true,
+                _mintFeeApplied: _amount,
+                _redemptionFeeApplied: 0
+            });
         }
         // For now, do not accept unactiveTokens as inputTokens.
     }
@@ -141,8 +171,12 @@ contract SafeOperations {
      * @dev
      *  Redemption fees do not apply where the user deposited DAI into the Safe.
      *  deposit(DAI) => (USDST = DAI + yield) => redeem(DAI + yield).
+     * @param _inputToken The inputToken to be withdrawn.
+     * @param _index The Safe to withdraw from.
+     * @param _amount The amount of activeTokens to burn in credit balances (not token balance).
+     * @param _minReceived Minimum amount of inputTokens to receive (before fees).
      */
-    function withdrawInputTokens(address _inputToken, uint _index, uint _amount)
+    function withdrawInputTokens(address _inputToken, uint _index, uint _amount, uint _minReceived)
         external
     {
         require(tokenToController[_inputToken] != address(0), "SafeOps: Controller not found");
@@ -154,53 +188,155 @@ contract SafeOperations {
 
         (
             withdrawCache.owner,
-            withdrawCache.receiptToken,
+            withdrawCache.activeToken,  // USDSTa
             withdrawCache.debtToken,
-            withdrawCache.bal,
-            withdrawCache.mintFeeApplied,
-            withdrawCache.redemptionFeeApplied,
-            withdrawCache.debt,
+            withdrawCache.bal,  // credits  // 1,000
+            withdrawCache.mintFeeApplied,   // credits  // 0
+            withdrawCache.redemptionFeeApplied, // tokens   // 1,000
+            withdrawCache.debt, // tokens
             withdrawCache.locked,
             withdrawCache.status
         ) = safeManagerContract.getSafe(msg.sender, _index);
 
         require(msg.sender == withdrawCache.owner, "SafeOps: Owner mismatch");
+        require(_amount <= withdrawCache.bal, "SafeOps: Insufficient Safe balance");
 
-        IActivated _receiptToken = IActivated(withdrawCache.receiptToken);
+        IActivated activeTokenContract = IActivated(withdrawCache.activeToken);
 
-        uint inputTokenBal = _receiptToken.convertToAssets(withdrawCache.bal);
-        require(_amount <= inputTokenBal, "SafeOps: Insufficient balance");
+        // Safe bal is in creditBalances, so need to estimate equivalent token balance.
+        uint tokenAmount = activeTokenContract.convertToAssets(_amount);
+        require(
+            _minReceived >= tokenAmount,
+            "SafeOps: Estimated tokens to receive is less than required amount"
+        );
 
-        // Second, transfer the correct amount of receiptTokens from SafeManager to Controller.
-        // Recall that receiptTokens target a 1:1 correlation of inputTokens held in the Vault.
+        // If > 0, means that the user is redeeming |redemptionFeeCoverage| amount of activeTokens,
+        // for which they are obliged to pay redemption fees.   // 1,500 - 1,000 = 500
+        int redemptionFeeCoverage = int(tokenAmount - withdrawCache.redemptionFeeApplied);
+
+        // Second, transfer the correct amount of activeTokens from SafeManager to Controller.
+        // Recall that activeTokens target a 1:1 correlation of inputTokens held in the Vault.
         // Approve _inputToken first before initiating transfer
 
         address _targetController = tokenToController[_inputToken];
 
-        IERC20 receiptTokenContractERC20 = IERC20(withdrawCache.receiptToken);
+        IERC20 activeTokenContractERC20 = IERC20(withdrawCache.activeToken);
 
-        // Keep receiptTokens in Controller, to save on transfers (?)
-        // Save 1 transfer: user deposits USDST to Controller (instead) and later redeems DAI.
-        // Save 1 transfer: user deposits DAI to Controller (instead) and later redeems DAI.
-        // Ans: NO, important to keep tokens in SafeManager in case of liquidations.
-        SafeERC20.safeTransferFrom(receiptTokenContractERC20, safeManager, _targetController, _amount);
+        SafeERC20.safeTransferFrom(activeTokenContractERC20, safeManager, _targetController, tokenAmount);
 
         IController targetController = IController(_targetController);
 
-        // Withdraw inputToken.
-        targetController.withdraw(msg.sender, _amount);
+        targetController.withdrawInputTokensFromSafe({
+            _withdrawer: msg.sender,
+            _amount: _amount,
+            _redemptionFeeCoverage: redemptionFeeCoverage
+        });
 
+        uint redemptionFeeChange;
+        if (redemptionFeeCoverage >= 0) {
+            // _redemptionFeeApplied = 0 in Safe.
+            redemptionFeeChange = withdrawCache.redemptionFeeApplied;
+        } else {
+            // E.g., 1,500 - 1,000 = 500.
+            redemptionFeeChange = withdrawCache.redemptionFeeApplied - tokenAmount;
+        }
+
+        // Lastly, update Safe params. If Safe is empty then mark it as closed (?)
+        safeManagerContract.adjustSafeBal({
+            _owner: msg.sender,
+            _index: _index,
+            _activeToken: withdrawCache.activeToken,
+            _amount: _amount,   // credits
+            _add: false,
+            _mintFeeApplied: 0, // credits
+            _redemptionFeeApplied: redemptionFeeChange  // tokens
+        });
+
+        if (_amount == withdrawCache.bal) {
+            safeManagerContract.setSafeStatus(msg.sender, _index, withdrawCache.activeToken, 2);
+        }
     }
 
     /**
      * @dev
      *  Mint fees do not apply where the user deposited USDT into the Safe.
      *  deposit(USDST) => (USDST) => redeem(USDST).
+     * @param _activeToken The inputToken to be withdrawn.
+     * @param _index The Safe to withdraw from.
+     * @param _amount The amount of activeTokens to burn in credit balances (not token balance).
      */
-    function withdrawReceiptTokens(address _receiptToken, uint _index, uint _amount)
+    function withdrawActiveTokens(address _activeToken, uint _index, uint _amount)
         external
     {
+        require(tokenToController[_activeToken] != address(0), "SafeOps: Controller not found");
 
+        // First, need to verify that the requested _amount of _inputToken can be
+        // redeemed for the specified Safe AND that msg.sender is the owner.
+
+        WithdrawCache memory withdrawCache;
+
+        (
+            withdrawCache.owner,
+            withdrawCache.activeToken,  // USDSTa
+            withdrawCache.debtToken,
+            withdrawCache.bal,  // credits  // 1,000
+            withdrawCache.mintFeeApplied,   // credits  // 0
+            withdrawCache.redemptionFeeApplied, // tokens   // 1,000
+            withdrawCache.debt, // tokens
+            withdrawCache.locked,
+            withdrawCache.status
+        ) = safeManagerContract.getSafe(msg.sender, _index);
+
+        require(msg.sender == withdrawCache.owner, "SafeOps: Owner mismatch");
+        require(_activeToken == withdrawCache.activeToken, "SafeOps: activeToken mismatch");
+        require(_amount <= withdrawCache.bal, "SafeOps: Insufficient Safe balance");
+
+        IActivated activeTokenContract = IActivated(_activeToken);
+
+        // If > 0, means that the user is "minting" |mintFeeCoverage| amount of activeTokens,
+        // for which they are obliged to pay minting fees.   // 1,500 - 1,000 = 500
+        int mintFeeCoverage = int(_amount - withdrawCache.mintFeeApplied);
+
+        address _targetController = tokenToController[_activeToken];
+
+        IERC20 activeTokenContractERC20 = IERC20(withdrawCache.activeToken);
+
+        // Safe bal is in creditBalances, so need to estimate equivalent token balance.
+        uint tokenAmount = activeTokenContract.convertToAssets(_amount);
+
+        SafeERC20.safeTransferFrom(activeTokenContractERC20, safeManager, _targetController, tokenAmount);
+
+        IController targetController = IController(_targetController);
+
+        targetController.withdrawActiveTokensFromSafe({
+            _withdrawer: msg.sender,
+            _amount: _amount,
+            _mintFeeCoverage: mintFeeCoverage
+        });
+
+        uint mintFeeChange;
+        if (mintFeeCoverage >= 0) {
+            // _redemptionFeeApplied = 0 in Safe.
+            mintFeeChange = withdrawCache.mintFeeApplied;
+        } else {
+            // E.g., 1,500 - 1,000 = 500.
+            mintFeeChange = withdrawCache.redemptionFeeApplied - _amount;
+        }
+
+        // Lastly, update Safe params. If Safe is empty then mark it as closed (?)
+        safeManagerContract.adjustSafeBal({
+            _owner: msg.sender,
+            _index: _index,
+            _activeToken: withdrawCache.activeToken,
+            _amount: _amount,   // credits
+            _add: false,
+            _mintFeeApplied: mintFeeChange, // credits
+            _redemptionFeeApplied: 0  // tokens
+        });
+
+        if (_amount == withdrawCache.bal) {
+            safeManagerContract.setSafeStatus(msg.sender, _index, withdrawCache.activeToken, 2);
+        }
     }
 
     function borrow(uint _amount)

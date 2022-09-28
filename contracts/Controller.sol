@@ -159,8 +159,7 @@ contract Controller is Ownable {
 
     /**
      * @notice
-     *  Deposits inputTokens into vault and issues Stoa (receipt) tokens.
-     *  (receiptTokens may be activeTokens or unactiveTokens).
+     *  Deposits inputTokens into vault and issues Stoa tokens.
      * @dev
      *  Callable either directly from user (custodial) or SafeOperations (non-custodial).
      *  Accepts supported inputTokens.
@@ -168,7 +167,7 @@ contract Controller is Ownable {
      * @param _amount The amount of inputTokens to deposit.
      * @param _activated Tells the Controller whether to mint active or unactive tokens to the depositor.
      * @dev When called via SafeOperations, '_activated' will always be true.
-     * @return mintAmount Amount of receiptTokens minted to caller.
+     * @return mintAmount Amount of Stoa tokens minted to caller.
      */
     function deposit(address _depositor, uint256 _amount, bool _activated)
         external
@@ -276,7 +275,8 @@ contract Controller is Ownable {
      *  Need to handle allocation of inputTokens received by the user if
      *  managing multiple vaults.
      * @param _withdrawer The address to receive inputTokens.
-     * @param _amount The amount of activeTokens transferred by the caller.
+     * @param _amount The amount of activeTokens transferred by the caller (in tokens).
+     * @return amount The amount of inputTokens redeemed from the vault.
      */
     function withdraw(address _withdrawer, uint _amount)
         external
@@ -312,6 +312,12 @@ contract Controller is Ownable {
         amountWithdrawn += _amount;
     }
 
+    /**
+     * @notice
+     *  Admin function to withdraw tokens from Vault.
+     *  May be used in case of emergency or a better yield opportunity
+     *  exists for a correlated input Token.
+     */
     function adminWithdraw(uint _amount, bool _max)
         external
         onlyOwner
@@ -334,26 +340,72 @@ contract Controller is Ownable {
      *  Separate withdraw function to handle redemptionFee logic.
      * @notice
      *  Function to withdraw inputTokens (e.g., DAI) from Safe.
+     * @param _withdrawer The address to send inputTokens to.
+     * @param _amount The amount of activeTokens to exchange for inputTokens (in tokens, not credits).
+     * @param _redemptionFeeCoverage The amount for which to charge redemption fees (if negative).
      */
-    function withdrawInputTokensFromSafe(address _withdrawer, uint _amount, uint _redemptionFeeApplied)
+    function withdrawInputTokensFromSafe(address _withdrawer, uint _amount, int _redemptionFeeCoverage)
         external
         onlySafeOps
+        returns (uint amount)
     {
-        // Safe Manager transfers corresponding receiptTokens.
-        // Controller retains receiptTokens for which redemption fees have not been applied.
+        // Safe Manager transfers corresponding active tokens (required for redemptions).
+        // Controller retains active tokens for which redemption fees have not been applied.
+        // If this is 0 then transferFrom directly from SafeManager to user.
+
+        uint _redemptionFee;
+
+        if (_redemptionFeeCoverage <= 0) {
+            _redemptionFee = 0;
+        } else {
+            _redemptionFee = computeRedemptionFee(uint(_redemptionFeeCoverage));
+        }
+
+        // 1,500 - (0.7% * 500) = 1,496.50.
+        uint redemptionAmount = _amount - _redemptionFee;
+
+        // transferFrom already executed by SafeOps.
+
+        // Stoa retains redemptionFee amount of activeToken (if not 0).
+        activeTokenContract.burn(address(this), redemptionAmount);
+
+        // Withdraw input token from Vault and send to withdrawer.
+        uint _shares = vault.convertToShares(redemptionAmount);
+        amount = vault.redeem(_shares, _withdrawer, address(this));
+
+        amountWithdrawn += _amount;
     }
 
     /**
      * @dev
      *  Separate withdraw function to handle mintFee logic.
      * @notice
-     *  Function to withdraw receiptTokens (e.g., USDSTa) from Safe.
+     *  Function to withdraw active tokens (e.g., USDSTa) from Safe.
      */
-    function withdrawReceiptTokensFromSafe(address _withdrawer, uint _amount, uint _mintFeeApplied)
+    function withdrawActiveTokensFromSafe(address _withdrawer, uint _amount, int _mintFeeCoverage)
         external
         onlySafeOps
+        returns (uint amount)
     {
-        // Safe Manager transfers receiptTokens for which mint fees have not been applied.
+        // Safe Manager transfers _amount of active tokens to Controller first.
+        // Controller retains active tokens for which minting fees have not been applied.
+        // If this is 0 then transferFrom directly from SafeManager to user.
+
+        uint _mintFee;
+
+        if (_mintFeeCoverage <= 0) {
+            _mintFee = 0;
+        } else {
+            _mintFee = computeMintFee(uint(_mintFeeCoverage));
+        }
+
+        // 1,500 - (0.7% * 500) = 1,496.50.
+        amount = _amount - _mintFee;
+
+        // transferFrom (to this address) already executed by SafeOps.
+
+        // Retain mintFee amount of activeToken.
+        SafeERC20.safeTransfer(activeTokenContractERC20, _withdrawer, amount);
     }
 
     function rebase()
@@ -411,12 +463,12 @@ contract Controller is Ownable {
         _redemptionFee = (_amount / 10_000) * redemptionFee;
     }
 
-    function getReceiptToken()
+    function getActiveToken()
         public
         view
-        returns (address receiptToken)
+        returns (address _activeToken)
     {
-        receiptToken = activeToken;
+        _activeToken = activeToken;
     }
 
     // Needs amending if storing activeToken in Controller for Safes.

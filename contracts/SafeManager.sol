@@ -24,7 +24,7 @@ contract SafeManager {
      * @dev
      *  Counter that increments each time an address opens a Safe.
      *  Enables us to differentiate between Safes of the same user that
-     *  have the same receiptToken but not debtToken.
+     *  have the same activeToken but not debtToken.
      *  E.g., Safe 1: BTCST => USDSTu, Safe 2: BTCST => ETHSTu.
      *  Reason being, for now, only allow one debtToken per Safe.
      */
@@ -36,20 +36,21 @@ contract SafeManager {
     mapping(address => mapping(uint => Safe)) public safe;
 
     /**
-     * @dev receiptToken => rebasingCreditsPerToken.
+     * @dev activeToken => rebasingCreditsPerToken.
      *  Motivation in having is to update Safe bals upon rebase (?)
      */
-    mapping(address => uint) public rebasingCreditsPerReceiptToken;
+    mapping(address => uint) public rebasingCreditsPerActiveToken;
 
     /**
-     * @dev receiptToken => Max Collateralization Ratio.
+     * @dev unactiveToken => Max Collateralization Ratio.
+     * @notice Can only borrow unactive (non-yield-bearing) Stoa tokens (e.g., USDST).
      */
-    mapping(address => uint) public receiptTokenToMCR;
+    mapping(address => uint) public unactiveTokenToMCR;
 
     /**
-     * @dev Start with one available debtToken per receiptToken to begin with.
+     * @dev Start with one available debtToken per activeToken to begin with.
      */
-    mapping(address => address[]) public receiptTokenToSupportedDebtTokens;
+    mapping(address => address[]) public activeTokenToSupportedDebtTokens;
 
     enum Status {
         nonExistent,
@@ -58,22 +59,25 @@ contract SafeManager {
         closedByLiquidation
     }
 
-    // One Safe supports one type of receiptToken and one type of debtToken.
+    /**
+     * @notice
+     *  For now, one Safe supports one type of activeToken and one type of debtToken.
+     */
     struct Safe {
         address owner;
         // // E.g., USDST
-        address receiptToken;
+        address activeToken;
         // E.g., USDSTu
         // Might not necessarily know this when opening a Safe.
         address debtToken;
-        // receiptToken creditBalance;
+        // activeToken creditBalance;
         uint bal;
         // Increments only if depositing activeToken.
         uint mintFeeApplied;
         uint redemptionFeeApplied;
         // Balance of the debtToken.
         uint debt;
-        // Amount of receiptTokens locked as collateral.
+        // Amount of activeTokens locked as collateral.
         uint locked;
         uint index;
         Status status;
@@ -92,8 +96,8 @@ contract SafeManager {
     }
 
     /**
-     * @notice Function to verify Safe's receiptToken.
-     * @return bool Expected receiptToken is correct.
+     * @notice Function to verify Safe's activeToken.
+     * @return bool Expected activeToken is correct.
      */
     function getSafe(
         address _owner,
@@ -101,7 +105,7 @@ contract SafeManager {
     ) external view returns (address, address, address, uint, uint, uint, uint, uint, uint) {
         return (
             safe[_owner][_index].owner,
-            safe[_owner][_index].receiptToken,
+            safe[_owner][_index].activeToken,
             safe[_owner][_index].debtToken,
             safe[_owner][_index].bal,
             safe[_owner][_index].mintFeeApplied,
@@ -114,7 +118,7 @@ contract SafeManager {
 
     function openSafe(
         address _owner,
-        address _receiptToken,
+        address _activeToken,
         uint _amount,
         uint _mintFeeApplied,
         uint _redemptionFeeApplied
@@ -127,7 +131,7 @@ contract SafeManager {
 
         // Now set Safe params.
         safe[_owner][_index].owner = _owner;
-        safe[_owner][_index].receiptToken = _receiptToken;
+        safe[_owner][_index].activeToken = _activeToken;
         safe[_owner][_index].bal = _amount;
         safe[_owner][_index].mintFeeApplied = _mintFeeApplied;
         safe[_owner][_index].redemptionFeeApplied = _redemptionFeeApplied;
@@ -141,13 +145,13 @@ contract SafeManager {
      * @dev Safe balance setter, called only by SafeOperations
      * @param _owner The owner of the Safe.
      * @param _index The Safe's index.
-     * @param _amount The amount of receiptTokens.
+     * @param _amount The amount of activeTokens.
      * @param _add Boolean to indicate if _amount subtracts or adds to Safe balance.
      */
     function adjustSafeBal(
         address _owner,
         uint _index,
-        address _receiptToken,
+        address _activeToken,
         uint _amount,
         bool _add,
         uint _mintFeeApplied,
@@ -156,7 +160,7 @@ contract SafeManager {
         external
         onlySafeOps
     {
-        require(safe[_owner][_index].receiptToken == _receiptToken, "SafeManager: receiptToken mismatch");
+        require(safe[_owner][_index].activeToken == _activeToken, "SafeManager: activeToken mismatch");
         if (_add == true) {
             safe[_owner][_index].bal += _amount;
             safe[_owner][_index].mintFeeApplied += _mintFeeApplied;
@@ -166,43 +170,56 @@ contract SafeManager {
             // When debtTokens are issued, it moves the proportionate amount from 'bal' to 'locked'.
             // Therefore, only consider 'bal' for now.
             safe[_owner][_index].bal -= _amount;
-            // Fees
+            safe[_owner][_index].mintFeeApplied -= _mintFeeApplied;
+            safe[_owner][_index].redemptionFeeApplied -= _redemptionFeeApplied;
         }
     }
 
     /**
      * @dev Safe debt setter, called only by SafeOperations.
      * @param _owner The owner of the Safe.
-     * @param _inputToken Parameter for identifying the Safe.
+     * @param _index The Safe's index.
+     * @param _debtToken The Safe's debtToken.
      * @param _amount The amount of debtTokens.
      * @param _add Boolean to indicate if _amount subtracts or adds to Safe debt.
      */
     function adjustSafeDebt(
         address _owner,
-        address _inputToken,
+        uint _index,
+        address _debtToken,
         uint _amount,
         bool _add
-    ) external onlySafeOps {
+    )
+        external
+        onlySafeOps
+    {
+        require(safe[_owner][_index].debtToken == _debtToken, "SafeManager: debtToken mismatch");
         if (_add == true) {
-            // Insert logic to handle max debt allowance.
-            safe[_owner][_inputToken].bal += _amount;
+            // Insert logic to handle max debt allowance / check if owner can be issued more debtTokens.
+            safe[_owner][_index].debt += _amount;
         } else {
-
+            safe[_owner][_index].debt -= _amount;
         }
     }
 
     /**
      * @dev Safe Status setter, called only by SafeOperations.
      * @param _owner The owner of the Safe.
-     * @param _inputToken Parameter for identifying the Safe.
+     * @param _index The Safe's index.
+     * @param _activeToken The Safe's activeToken.
      * @param _num Parameter for selecting the Status.
      */
     function setSafeStatus(
         address _owner,
-        address _inputToken,
+        uint _index,
+        address _activeToken,
         uint _num
-    ) external onlySafeOps {
-        safe[_owner][_inputToken].status = Status(_num);
+    )
+        external
+        onlySafeOps
+    {
+        require(safe[_owner][_index].activeToken == _activeToken, "SafeManager: activeToken mismatch");
+        safe[_owner][_index].status = Status(_num);
     }
 
     function approveToken(address _token, address _spender) external {
@@ -213,13 +230,13 @@ contract SafeManager {
     /**
      * @dev
      *  Function for updating token balances upon rebase.
-     *  Only callable from the target Controller of the receiptToken.
+     *  Only callable from the target Controller of the activeToken.
      */
     function updateRebasingCreditsPerToken(
-        address _receiptToken
+        address _activeToken
     ) external returns (uint) {
-        address _controller = safeOperationsContract.getController(_receiptToken);
+        address _controller = safeOperationsContract.getController(_activeToken);
         require(msg.sender == _controller, "Only target Controller can call");
-        return rebasingCreditsPerReceiptToken[_receiptToken] = IActivated(_receiptToken).rebasingCreditsPerToken();
+        return rebasingCreditsPerActiveToken[_activeToken] = IActivated(_activeToken).rebasingCreditsPerToken();
     }
 }

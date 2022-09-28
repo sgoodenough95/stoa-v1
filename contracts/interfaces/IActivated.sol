@@ -14,6 +14,8 @@ interface IActivated {
     function burn(address _account, uint _amount) external;
 
     function convertToAssets(uint _creditBalance) external view returns (uint);
+
+    function convertToCredits(uint _tokenBalance) external view returns (uint);
     
     function changeSupply(uint _newTotalSupply) external returns (uint);
 

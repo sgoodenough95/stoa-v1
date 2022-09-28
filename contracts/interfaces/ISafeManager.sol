@@ -11,21 +11,21 @@ interface ISafeManager {
         closedByLiquidation
     }
 
-    // One Safe supports one type of receiptToken and one type of debtToken.
+    // One Safe supports one type of activeToken and one type of debtToken.
     struct Safe {
         // // E.g., USDST
-        address receiptToken;
+        address activeToken;
         // E.g., USDSTu
         // Might not necessarily know this when opening a Safe.
         address debtToken;
-        // receiptToken creditBalance;
+        // activeToken creditBalance;
         uint bal;
         // Increments only if depositing activeToken.
         uint mintFeeApplied;
         uint redemptionFeeApplied;
         // Balance of the debtToken.
         uint debt;
-        // Amount of receiptTokens locked as collateral.
+        // Amount of activeTokens locked as collateral.
         uint locked;
         uint index;
         Status status;
@@ -38,7 +38,7 @@ interface ISafeManager {
 
     function openSafe(
         address _owner,
-        address _receiptToken,
+        address _activeToken,
         uint _amount,
         uint _mintFeeApplied,
         uint _redemptionFeeApplied
@@ -47,11 +47,18 @@ interface ISafeManager {
     function adjustSafeBal(
         address _owner,
         uint _index,
-        address _receiptToken,
+        address _activeToken,
         uint _amount,
         bool _add,
         uint _mintFeeApplied,
         uint _redemptionFeeApplied
+    ) external;
+
+    function setSafeStatus(
+        address _owner,
+        uint _index,
+        address _activeToken,
+        uint _num
     ) external;
 
     function updateRebasingCreditsPerToken(address _inputToken) external view returns (uint);
