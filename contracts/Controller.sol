@@ -69,6 +69,8 @@ contract Controller is Ownable {
      */
     bool public isReceivingInputs;
 
+    mapping(address => uint) private unactiveRedemptionAllowance;
+
     /**
      * @notice
      *  This is the Controller's reserve of activeTokens used to back
@@ -225,6 +227,8 @@ contract Controller is Ownable {
 
             // Unspendable tokens used to back unactiveTokens.
             activeTokenBackingReserve += mintAmount;
+
+            unactiveRedemptionAllowance[msg.sender] += mintAmount;
         }
     }
 
@@ -264,7 +268,58 @@ contract Controller is Ownable {
         // Controller captures mintFee amount + future yield earned.
         activeTokenBackingReserve += mintAmount;
 
+        unactiveRedemptionAllowance[msg.sender] += mintAmount;
+
         unactiveTokenContract.mint(msg.sender, mintAmount);
+    }
+
+    /**
+     * @notice
+     *  Function that allows for unactive redemptions for either the
+     *  activeToken or inputToken.
+     *  Motivation in having is to reduce the load off the Activator.
+     * @param _amount The amount of unactiveTokens to redeem.
+     * @param _activated Indicates whether the user wants to receive activeTokens.
+     * @return redemptionAmount The amount of tokens to receive.
+     */
+    function unactiveRedemption(uint _amount, bool _activated)
+        external
+        nonReentrant
+        returns (uint redemptionAmount)
+    {
+        require(
+            unactiveRedemptionAllowance[msg.sender] >= _amount,
+            "Controller: Insufficient unactive token redemption allowance"
+        );
+        require(
+            unactiveTokenContractERC20.balanceOf(msg.sender) >= _amount,
+            "Controller: Insufficient balance"
+        );
+
+        uint _redemptionFee = computeRedemptionFee(_amount);
+        redemptionAmount = _amount - _redemptionFee;
+
+        // Burn the user's unactive tokens.
+        unactiveTokenContract.burn(msg.sender, _amount);
+
+        if (_activated == true) {
+            SafeERC20.safeTransfer(
+                activeTokenContractERC20,
+                msg.sender,
+                redemptionAmount
+            );
+
+            activeTokenBackingReserve -= redemptionAmount;
+        } else {
+            // Stoa retains redemptionFee amount of activeToken.
+            activeTokenContract.burn(address(this), redemptionAmount);
+
+            // Withdraw input token from Vault and send to withdrawer.
+            uint _shares = vault.convertToShares(redemptionAmount);
+            vault.redeem(_shares, msg.sender, address(this));
+
+            amountWithdrawn += _amount;
+        }
     }
 
     /**

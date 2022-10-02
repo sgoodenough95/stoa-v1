@@ -339,6 +339,12 @@ contract SafeOperations {
         }
     }
 
+    function initializeBorrow(uint _index, address _debtToken, uint _amount)
+        external
+    {
+        
+    }
+
     function borrow(uint _amount)
         external
     {
@@ -351,13 +357,35 @@ contract SafeOperations {
 
     }
 
+    function transferActiveTokens(
+        address _activeToken,
+        uint _index,
+        uint _amount,
+        address _to,
+        uint _toIndex
+    )
+        external
+    {
+
+    }
+
+    function transferDebtTokens(
+        address _debtToken,
+        uint _index,
+        uint _amount,
+        uint _newIndex
+    )
+        external
+    {
+
+    }
+
     /**
      * @dev Admin function to set the Controller of a given inputToken.
      */
-    function setController(
-        address _inputToken,
-        address _controller
-    ) external {
+    function setController(address _inputToken, address _controller)
+        external
+    {
         tokenToController[_inputToken] = _controller;
     }
 }

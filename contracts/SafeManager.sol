@@ -11,8 +11,12 @@ import "./interfaces/ISafeOperations.sol";
  *  Stores Safe data.
  *  Each Safe supports one type of collateral asset.
  *  Stores liquidation logic. Keepers can liquidate Safes where their CR is breached.
+ *  TBD whether we have a separate 'ActivePool' contract (for each active-debt Token pair)
+ *  that holds collateral and tracks debts.
  * @notice
- *  Contract that owns Safes. Holds 'activated' and 'unactivated' Stoa tokens held by users in Safes.
+ *  Contract that owns Safes. Holds 'activated' (yield-bearing) Stoa tokens, owned by Safe owners.
+ *  Does not hold 'unactivated' tokens as they have no functionality as a Safe asset, but
+ *  are purely debt tokens (similar to Dai's Vaults).
  */
 contract SafeManager {
 
@@ -23,9 +27,8 @@ contract SafeManager {
     /**
      * @dev
      *  Counter that increments each time an address opens a Safe.
-     *  Enables us to differentiate between Safes of the same user that
-     *  have the same activeToken but not debtToken.
-     *  E.g., Safe 1: BTCST => USDSTu, Safe 2: BTCST => ETHSTu.
+     *  Enables us to identify one of the user's Safes.
+     *  E.g., Safe 1: BTCSTa => USDST, Safe 2: BTCSTa => EURST.
      *  Reason being, for now, only allow one debtToken per Safe.
      */
     mapping(address => uint) currentSafeIndex;
@@ -42,15 +45,37 @@ contract SafeManager {
     mapping(address => uint) public rebasingCreditsPerActiveToken;
 
     /**
-     * @dev unactiveToken => Max Collateralization Ratio.
-     * @notice Can only borrow unactive (non-yield-bearing) Stoa tokens (e.g., USDST).
+     * @dev activeToken-debtToken => Max Collateralization Ratio.
+     *  MCR measured in basis points.
+     *  For active-unactive counterparts, will always be 200% (MCR = 20_000).
+     *  E.g., to mint 1,000 USDST, you would require 2,000 USDSTa.
+     * @notice
+     *  Can only borrow unactive (non-yield-bearing) Stoa tokens (e.g., USDST).
+     *  If returns 0, then the debtToken is not supported for the activeToken,
+     *  and vice versa.
      */
-    mapping(address => uint) public unactiveTokenToMCR;
+    mapping(address => mapping(address => uint)) public activeToDebtTokenMCR;
+
+    mapping(address => address) public activeToUnactiveCounterpart;
 
     /**
      * @dev Start with one available debtToken per activeToken to begin with.
      */
     mapping(address => address[]) public activeTokenToSupportedDebtTokens;
+
+    /**
+     * @notice
+     *  One-time fee charged upon debt issuance, measured in basis points.
+     *  Later make fixed (?)
+     */
+    uint public originationFee;
+
+    /**
+     * @notice
+     *  Minimum amount of debtToken that can be minted upon a borrow request.
+     *  E.g., Min amount of 100 USDST can be minted upon borrow.
+     */
+    mapping(address => uint) debtTokenMinMint;
 
     enum Status {
         nonExistent,
@@ -62,6 +87,12 @@ contract SafeManager {
     /**
      * @notice
      *  For now, one Safe supports one type of activeToken and one type of debtToken.
+     * @dev
+     *  Do not need to include a parameter to indiciate if a Safe is underwater.
+     *  This is because, as a Safe supports one type of activeToken and debtToken,
+     *  there will be some ratio where, if equal to or greater than, the Safe will be
+     *  deemed underwater and can be liquidated.
+     *  This ratio will vary between activeToken-debtToken pairs.
      */
     struct Safe {
         address owner;
@@ -218,8 +249,68 @@ contract SafeManager {
         external
         onlySafeOps
     {
-        require(safe[_owner][_index].activeToken == _activeToken, "SafeManager: activeToken mismatch");
+        // Additional check, may later be removed.
+        require(
+            safe[_owner][_index].activeToken == _activeToken,
+            "SafeManager: activeToken mismatch"
+        );
         safe[_owner][_index].status = Status(_num);
+    }
+
+    function initializeBorrow(
+        address _owner,
+        uint _index,
+        address _activeToken,
+        address _debtToken,
+        uint _amount
+    )
+        external
+        onlySafeOps
+    {
+
+    }
+
+    /**
+     * @notice
+     *  View function that returns true if a Vault can be liquidated.
+     * @dev
+     *  TBD whether we adopt similar approach to Liquity regarding
+     *  "sorting" Safes (of the same active-debtToken pair) for more efficient
+     *  liquidations, or whether this can be handled externally by simply
+     *  collating and updating a list of Safes w.r.t their CR.
+     */
+    function isUnderwater(address _owner, uint _index)
+        external
+        view
+        returns (bool)
+    {
+        address activeToken = safe[_owner][_index].activeToken;
+        address debtToken = safe[_owner][_index].debtToken;
+
+        require(
+            activeToUnactiveCounterpart[activeToken] != debtToken,
+            "SafeManager: Cannot liquidate counterparts"
+        );
+        require(
+            activeToDebtTokenMCR[activeToken][debtToken] != 0,
+            "SafeManager: Invalid pair"
+        );
+
+        uint MCR = activeToDebtTokenMCR[activeToken][debtToken];
+        uint CR = (safe[_owner][_index].bal / safe[_owner][_index].debt) * 10_000;
+
+        if (CR < MCR) return true;
+        else return false;
+    }
+
+    function liquidateSafe(address _owner, uint _index)
+        external
+    {
+        require(
+            this.isUnderwater(_owner, _index),
+            "SafeManager: Safe not underwater"
+        );
+        // liquidation logic.
     }
 
     function approveToken(address _token, address _spender) external {
@@ -231,6 +322,9 @@ contract SafeManager {
      * @dev
      *  Function for updating token balances upon rebase.
      *  Only callable from the target Controller of the activeToken.
+     *  Motivation in including this is that, when a rebase occurs, the respective Controller
+     *  updates this value. May later remove however and simply read from the
+     *  activeToken's ERC20 contract.
      */
     function updateRebasingCreditsPerToken(
         address _activeToken
