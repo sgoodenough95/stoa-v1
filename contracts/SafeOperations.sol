@@ -225,7 +225,9 @@ contract SafeOperations {
         // for which they are required to pay minting fees.
         int feeCoverage = int(_amount - feeApplied);
 
-        address _targetController = tokenToController[_activeToken];
+        // Passing 'token' or 'withdrawCache.activeToken' should return the same Controller.
+        // Opt for the latter to mitigate chance of user input resulting in unintended code execution.
+        address _targetController = tokenToController[withdrawCache.activeToken];
 
         IERC20 activeTokenContractERC20 = IERC20(withdrawCache.activeToken);
 
