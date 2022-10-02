@@ -36,7 +36,7 @@ interface ISafeManager {
         uint _index
     ) external view returns (address, address, address, uint, uint, uint, uint, uint, uint);
 
-    function openSafe(
+    function initializeSafe(
         address _owner,
         address _activeToken,
         uint _amount,

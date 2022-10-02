@@ -147,7 +147,7 @@ contract SafeManager {
         );
     }
 
-    function openSafe(
+    function initializeSafe(
         address _owner,
         address _activeToken,
         uint _amount,
@@ -191,7 +191,9 @@ contract SafeManager {
         external
         onlySafeOps
     {
+        // Additional check to confirm that the activeToken being deposited is correct, may later be removed.
         require(safe[_owner][_index].activeToken == _activeToken, "SafeManager: activeToken mismatch");
+        
         if (_add == true) {
             safe[_owner][_index].bal += _amount;
             safe[_owner][_index].mintFeeApplied += _mintFeeApplied;

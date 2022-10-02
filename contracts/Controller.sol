@@ -178,11 +178,6 @@ contract Controller is Ownable {
     {
         require(_amount > MIN_AMOUNT, "Controller: Amount too low");
 
-        // Need to later adapt to handle 2+ inputTokens and;
-        // insert logic to convert inputTokens to optimise for the best yield.
-        // As this logic may be ever-changing and unique, probably best to house in
-        // a separate contract.
-
         // Use _depositor in place of msg.sender to check balance of depositor if called
         // via SafeOperations contract.
         require(
@@ -190,16 +185,15 @@ contract Controller is Ownable {
             "Controller: Depositor has insufficient funds"
         );
 
-        amountDeposited += _amount;
-
         // Approve _inputTokenContract first before initiating transfer
         // for vault to spend (transfer directly from depositor to vault)
 
         // Directly transfer from depositor to vault.
         // (Requires additional argument in deposit() of VaultWrapper: depositor).
         vault.deposit(_amount, address(this), _depositor);
+        amountDeposited += _amount;
 
-        uint _mintFee = computeMintFee(_amount);
+        uint _mintFee = computeFee(_amount, true);
         mintAmount = _amount - _mintFee;
 
         // E.g., DAI => USDSTa.
@@ -212,6 +206,7 @@ contract Controller is Ownable {
             } else {
                 activeTokenContract.mint(msg.sender, mintAmount);
 
+                // Capture mintFee.
                 activeTokenContract.mint(address(this), mintFee);
             }
 
@@ -234,7 +229,7 @@ contract Controller is Ownable {
 
     /**
      * @notice
-     *  Provides one-way conversion from active to unactive tokens.
+     *  Provides conversion from active to unactive tokens.
      *  Simply transfers activeToken from user to this address and marks
      *  as unspendable.
      *  Excess activeTokens such as those generated from the yield are spendable.
@@ -253,7 +248,7 @@ contract Controller is Ownable {
             "Controller: Insufficent active token balance"
         );
 
-        uint _mintFee = computeMintFee(_amount);
+        uint _mintFee = computeFee(_amount, true);
         mintAmount = _amount - _mintFee;
 
         // Approve _inputTokenContract first before initiating transfer
@@ -268,6 +263,7 @@ contract Controller is Ownable {
         // Controller captures mintFee amount + future yield earned.
         activeTokenBackingReserve += mintAmount;
 
+        // Only users that do the conversion are permitted to convert back.
         unactiveRedemptionAllowance[msg.sender] += mintAmount;
 
         unactiveTokenContract.mint(msg.sender, mintAmount);
@@ -296,7 +292,7 @@ contract Controller is Ownable {
             "Controller: Insufficient balance"
         );
 
-        uint _redemptionFee = computeRedemptionFee(_amount);
+        uint _redemptionFee = computeFee(_amount, false);
         redemptionAmount = _amount - _redemptionFee;
 
         // Burn the user's unactive tokens.
@@ -309,7 +305,6 @@ contract Controller is Ownable {
                 redemptionAmount
             );
 
-            activeTokenBackingReserve -= redemptionAmount;
         } else {
             // Stoa retains redemptionFee amount of activeToken.
             activeTokenContract.burn(address(this), redemptionAmount);
@@ -320,6 +315,9 @@ contract Controller is Ownable {
 
             amountWithdrawn += _amount;
         }
+        
+        // No longer need to back the _amount of unactiveTokens burned.
+        activeTokenBackingReserve -= _amount;
     }
 
     /**
@@ -344,7 +342,7 @@ contract Controller is Ownable {
         );
         require(_amount > MIN_AMOUNT, "Controller: Amount too low");
 
-        uint _redemptionFee = computeRedemptionFee(_amount);
+        uint _redemptionFee = computeFee(_amount, false);
         uint redemptionAmount = _amount - _redemptionFee;
 
         // Approve _inputTokenContract first before initiating transfer
@@ -391,76 +389,35 @@ contract Controller is Ownable {
     }
 
     /**
-     * @dev
-     *  Separate withdraw function to handle redemptionFee logic.
      * @notice
      *  Function to withdraw inputTokens (e.g., DAI) from Safe.
      * @param _withdrawer The address to send inputTokens to.
+     * @param _activated Indicates if withdrawing activeTokens (if not, then inputTokens).
      * @param _amount The amount of activeTokens to exchange for inputTokens (in tokens, not credits).
-     * @param _redemptionFeeCoverage The amount for which to charge redemption fees (if negative).
+     * @param _feeCoverage The amount for which to charge minting or redemption fees (if negative).
      */
-    function withdrawInputTokensFromSafe(address _withdrawer, uint _amount, int _redemptionFeeCoverage)
+    function withdrawTokensFromSafe(address _withdrawer, bool _activated, uint _amount, int _feeCoverage)
         external
         onlySafeOps
         returns (uint amount)
     {
-        // Safe Manager transfers corresponding active tokens (required for redemptions).
-        // Controller retains active tokens for which redemption fees have not been applied.
-        // If this is 0 then transferFrom directly from SafeManager to user.
+        uint fee = _feeCoverage <= 0 ? 0 : computeFee(_amount, _activated);
 
-        uint _redemptionFee;
+        amount = _amount - fee;
 
-        if (_redemptionFeeCoverage <= 0) {
-            _redemptionFee = 0;
+        if (_activated == true) {
+            SafeERC20.safeTransfer(activeTokenContractERC20, _withdrawer, amount);
         } else {
-            _redemptionFee = computeRedemptionFee(uint(_redemptionFeeCoverage));
+            // transferFrom to Controller already executed by SafeOps.
+            // Stoa retains redemptionFee amount of activeToken (if not 0).
+            activeTokenContract.burn(address(this), amount);
+
+            // Withdraw input token from Vault and send to withdrawer.
+            uint _shares = vault.convertToShares(amount);
+            amount = vault.redeem(_shares, _withdrawer, address(this));
+
+            amountWithdrawn += _amount;
         }
-
-        // 1,500 - (0.7% * 500) = 1,496.50.
-        uint redemptionAmount = _amount - _redemptionFee;
-
-        // transferFrom already executed by SafeOps.
-
-        // Stoa retains redemptionFee amount of activeToken (if not 0).
-        activeTokenContract.burn(address(this), redemptionAmount);
-
-        // Withdraw input token from Vault and send to withdrawer.
-        uint _shares = vault.convertToShares(redemptionAmount);
-        amount = vault.redeem(_shares, _withdrawer, address(this));
-
-        amountWithdrawn += _amount;
-    }
-
-    /**
-     * @dev
-     *  Separate withdraw function to handle mintFee logic.
-     * @notice
-     *  Function to withdraw active tokens (e.g., USDSTa) from Safe.
-     */
-    function withdrawActiveTokensFromSafe(address _withdrawer, uint _amount, int _mintFeeCoverage)
-        external
-        onlySafeOps
-        returns (uint amount)
-    {
-        // Safe Manager transfers _amount of active tokens to Controller first.
-        // Controller retains active tokens for which minting fees have not been applied.
-        // If this is 0 then transferFrom directly from SafeManager to user.
-
-        uint _mintFee;
-
-        if (_mintFeeCoverage <= 0) {
-            _mintFee = 0;
-        } else {
-            _mintFee = computeMintFee(uint(_mintFeeCoverage));
-        }
-
-        // 1,500 - (0.7% * 500) = 1,496.50.
-        amount = _amount - _mintFee;
-
-        // transferFrom (to this address) already executed by SafeOps.
-
-        // Retain mintFee amount of activeToken.
-        SafeERC20.safeTransfer(activeTokenContractERC20, _withdrawer, amount);
     }
 
     function rebase()
@@ -502,12 +459,13 @@ contract Controller is Ownable {
         value = vault.maxWithdraw(address(this));
     }
 
-    function computeMintFee(uint _amount)
+    function computeFee(uint _amount, bool _mint)
         public
         view
-        returns (uint _mintFee)
+        returns (uint fee)
     {
-        _mintFee = (_amount / 10_000) * mintFee;
+        uint _fee = _mint == true ? mintFee : redemptionFee;
+        fee = (_amount / 10_000) * _fee;
     }
 
     function computeRedemptionFee(uint _amount)
