@@ -128,24 +128,49 @@ contract SafeManager {
 
     /**
      * @notice Function to verify Safe's activeToken.
-     * @return bool Expected activeToken is correct.
      */
-    function getSafe(
+    function getSafeInit(
         address _owner,
         uint _index
-    ) external view returns (address, address, address, uint, uint, uint, uint, uint, uint) {
+    )
+        external
+        view
+        returns (address, address, address) {
         return (
             safe[_owner][_index].owner,
             safe[_owner][_index].activeToken,
-            safe[_owner][_index].debtToken,
+            safe[_owner][_index].debtToken
+        );
+    }
+
+    function getSafeVal(
+        address _owner,
+        uint _index
+    )
+        external
+        view
+        returns (uint, uint, uint, uint, uint)
+    {
+        return (
             safe[_owner][_index].bal,
             safe[_owner][_index].mintFeeApplied,
             safe[_owner][_index].redemptionFeeApplied,
             safe[_owner][_index].debt,
-            safe[_owner][_index].locked,
-            uint(safe[_owner][_index].status)
+            safe[_owner][_index].locked
         );
     }
+
+    function getSafeStatus(
+        address _owner,
+        uint _index
+    )  
+        external
+        view
+        returns (uint)
+    {
+        return uint(safe[_owner][_index].status);
+    }
+
 
     function initializeSafe(
         address _owner,
@@ -305,15 +330,15 @@ contract SafeManager {
         else return false;
     }
 
-    function liquidateSafe(address _owner, uint _index)
-        external
-    {
-        require(
-            this.isUnderwater(_owner, _index),
-            "SafeManager: Safe not underwater"
-        );
-        // liquidation logic.
-    }
+    // function liquidateSafe(address _owner, uint _index)
+    //     external
+    // {
+    //     require(
+    //         this.isUnderwater(_owner, _index),
+    //         "SafeManager: Safe not underwater"
+    //     );
+    //     // liquidation logic.
+    // }
 
     function approveToken(address _token, address _spender) external {
         IERC20 token = IERC20(_token);

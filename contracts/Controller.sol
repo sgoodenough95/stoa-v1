@@ -144,9 +144,9 @@ contract Controller is Ownable {
 
         unactiveToken = _unactiveToken;
 
-        activeTokenContract = IActivated(activeTokenContract);
+        activeTokenContract = IActivated(activeToken);
 
-        unactiveTokenContract = IUnactivated(unactiveTokenContract);
+        unactiveTokenContract = IUnactivated(unactiveToken);
 
         activeTokenContractERC20 = IERC20(activeToken);
 
@@ -157,6 +157,15 @@ contract Controller is Ownable {
         activeTokenContractERC20.approve(address(this), type(uint).max);
 
         inputTokenContract.approve(address(vault), type(uint).max);
+    }
+
+    // Later add to common functions / helper contract (?)
+    function rebaseOptIn() public {
+        activeTokenContract.rebaseOptIn();
+    }
+
+    function rebaseOptOut() public {
+        activeTokenContract.rebaseOptOut();
     }
 
     /**
@@ -207,7 +216,7 @@ contract Controller is Ownable {
                 activeTokenContract.mint(msg.sender, mintAmount);
 
                 // Capture mintFee.
-                activeTokenContract.mint(address(this), mintFee);
+                activeTokenContract.mint(address(this), _mintFee);
             }
 
         // E.g., DAI => USDST.
@@ -251,14 +260,7 @@ contract Controller is Ownable {
         uint _mintFee = computeFee(_amount, true);
         mintAmount = _amount - _mintFee;
 
-        // Approve _inputTokenContract first before initiating transfer
-        // SafeERC20 might fail on rebasing token contract.
-        SafeERC20.safeTransferFrom(
-            activeTokenContractERC20,
-            msg.sender,
-            address(this),
-            _amount
-        );
+        activeTokenContract.transferFrom(msg.sender, address(this), _amount);
 
         // Controller captures mintFee amount + future yield earned.
         activeTokenBackingReserve += mintAmount;
@@ -299,11 +301,7 @@ contract Controller is Ownable {
         unactiveTokenContract.burn(msg.sender, _amount);
 
         if (_activated == true) {
-            SafeERC20.safeTransfer(
-                activeTokenContractERC20,
-                msg.sender,
-                redemptionAmount
-            );
+            activeTokenContract.transfer(msg.sender, redemptionAmount);
 
         } else {
             // Stoa retains redemptionFee amount of activeToken.
@@ -346,14 +344,7 @@ contract Controller is Ownable {
         uint redemptionAmount = _amount - _redemptionFee;
 
         // Approve _inputTokenContract first before initiating transfer
-        // SafeERC20 might fail on rebasing token contract.
-        // Transfer activeTokens to Controller first.
-        SafeERC20.safeTransferFrom(
-            activeTokenContractERC20,
-            msg.sender,
-            address(this),
-            _amount
-        );
+        activeTokenContract.transferFrom(msg.sender, address(this), _amount);
 
         // Stoa retains redemptionFee amount of activeToken.
         activeTokenContract.burn(address(this), redemptionAmount);
@@ -406,7 +397,7 @@ contract Controller is Ownable {
         amount = _amount - fee;
 
         if (_activated == true) {
-            SafeERC20.safeTransfer(activeTokenContractERC20, _withdrawer, amount);
+            activeTokenContract.transfer(_withdrawer, amount);
         } else {
             // transferFrom to Controller already executed by SafeOps.
             // Stoa retains redemptionFee amount of activeToken (if not 0).

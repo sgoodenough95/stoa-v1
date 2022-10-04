@@ -13,11 +13,19 @@ interface IActivated {
 
     function burn(address _account, uint _amount) external;
 
+    function transfer(address _to, uint256 _value) external returns (bool);
+
+    function transferFrom(address _from, address _to, uint _value) external returns (bool);
+
     function convertToAssets(uint _creditBalance) external view returns (uint);
 
     function convertToCredits(uint _tokenBalance) external view returns (uint);
     
-    function changeSupply(uint _newTotalSupply) external returns (uint);
+    function changeSupply(uint _newTotalSupply) external;
+
+    function rebaseOptIn() external;
+
+    function rebaseOptOut() external;
 
     function rebasingCreditsPerToken() external view returns (uint);
 }

@@ -26,17 +26,21 @@ contract SafeOperations {
 
     mapping(address => address) public activeToInputToken;
 
-    struct WithdrawCache {
+    struct CacheInit {
         address owner;
         address activeToken;
         address debtToken;
+    }
+
+    struct CacheVal {
         uint bal;
         uint mintFeeApplied;
         uint redemptionFeeApplied;
         uint debt;
         uint locked;
-        uint status;
     }
+
+    uint cacheStatus;
 
     // Reentrancy Guard logic.
     uint256 private constant _NOT_ENTERED = 1;
@@ -173,88 +177,84 @@ contract SafeOperations {
         // For now, do not accept unactiveTokens as inputTokens.
     }
 
+    // function withdrawTokens(address _activeToken, address _inputToken, uint _index, uint _amount)
+    //     external
+    // {
+    //     // XOR operation enforcing selection of activeToken or inputToken.
+    //     require(
+    //         _activeToken == address(0) && _inputToken != address(0) ||
+    //         _activeToken != address(0) && _inputToken == address(0)
+    //     );
+    //     (address token, bool activated) = _activeToken == address(0)
+    //         ? (_inputToken, false)
+    //         : (_activeToken, true);
+    //     require(tokenToController[token] != address(0), "SafeOps: Controller not found");
+
+    //     withdrawTokens(activated, _index, _amount);
+    // }
+
     /**
      * @notice
      *  Safe owners can deposit either activeTokens or inputTokens (e.g., USDSTa or DAI).
      *  Can only deposit if the Safe supports that token.
-     * @param _inputToken The inputToken (e.g., DAI) to withdraw (address(0) if not).
-     * @param _activeToken The activeToken (e.g., USDSTa) to withdraw (address(0) if not).
+     * @param _activated Boolean to indicate withdrawal of activeToken (true) or inputToken (false).
      * @param _index Identifier for the Safe.
      * @param _amount The amount to deposit.
      */
-    function withdrawTokens(address _activeToken, address _inputToken, uint _index, uint _amount)
+    function withdrawTokens(bool _activated, uint _index, uint _amount)
         external
     {
-        // XOR operation enforcing selection of activeToken or inputToken.
-        require(
-            _activeToken == address(0) && _inputToken != address(0) ||
-            _activeToken != address(0) && _inputToken == address(0)
-        );
-        (address token, bool activated) = _activeToken == address(0)
-            ? (_inputToken, false)
-            : (_activeToken, true);
-        require(tokenToController[token] != address(0), "SafeOps: Controller not found");
-
-        // First, need to verify that the requested _amount of _inputToken can be
-        // redeemed for the specified Safe AND that msg.sender is the owner.
-
-        WithdrawCache memory withdrawCache;
+        CacheInit memory cacheInit;
 
         (
-            withdrawCache.owner,
-            withdrawCache.activeToken,
-            withdrawCache.debtToken,
-            withdrawCache.bal,  // credits
-            withdrawCache.mintFeeApplied,   // credits
-            withdrawCache.redemptionFeeApplied, // tokens
-            withdrawCache.debt, // tokens
-            withdrawCache.locked,
-            withdrawCache.status
-        ) = safeManagerContract.getSafe(msg.sender, _index);
+            cacheInit.owner,
+            cacheInit.activeToken,
+            cacheInit.debtToken
+        ) = safeManagerContract.getSafeInit(msg.sender, _index);
 
-        require(msg.sender == withdrawCache.owner, "SafeOps: Owner mismatch");
-        require(_amount <= withdrawCache.bal, "SafeOps: Insufficient Safe balance");
+        CacheVal memory cacheVal;
 
-        IActivated activeTokenContract = IActivated(withdrawCache.activeToken);
+        (
+            cacheVal.bal,  // credits
+            cacheVal.mintFeeApplied,   // credits
+            cacheVal.redemptionFeeApplied, // tokens
+            cacheVal.debt, // tokens
+            cacheVal.locked    // credits
+        ) = safeManagerContract.getSafeVal(msg.sender, _index);
 
-        uint feeApplied = token == _activeToken
-            ? withdrawCache.mintFeeApplied
-            : withdrawCache.redemptionFeeApplied;
+        require(msg.sender == cacheInit.owner, "SafeOps: Owner mismatch");
+        require(_amount <= cacheVal.bal, "SafeOps: Insufficient Safe balance");
 
-        // If > 0, means that the user is "minting" or redeeming |feeCoverage| amount of tokens,
-        // for which they are required to pay minting fees.
-        int feeCoverage = int(_amount - feeApplied);
-
-        // Passing 'token' or 'withdrawCache.activeToken' should return the same Controller.
-        // Opt for the latter to mitigate chance of user input resulting in unintended code execution.
-        address _targetController = tokenToController[withdrawCache.activeToken];
-
-        IERC20 activeTokenContractERC20 = IERC20(withdrawCache.activeToken);
+        IActivated activeTokenContract = IActivated(cacheInit.activeToken);
 
         // Safe bal is in creditBalances, so need to estimate equivalent token balance.
         uint tokenAmount = activeTokenContract.convertToAssets(_amount);
 
-        uint feeChange = computeFeeChange(
-            feeCoverage,
-            feeApplied,
+        (int feeCoverage, uint mintFeeChange, uint redemptionFeeChange) = computeFee(
+            _activated,
+            cacheVal.mintFeeApplied,
+            cacheVal.redemptionFeeApplied,
             tokenAmount
         );
 
+        // Locate the activeToken's Controller.
+        address _targetController = tokenToController[cacheInit.activeToken];
+
+        IERC20 activeTokenContractERC20 = IERC20(cacheInit.activeToken);
+
+        // Transfer activeTokens to the Controller to be able to service the withdrawal.
         SafeERC20.safeTransferFrom(activeTokenContractERC20, safeManager, _targetController, tokenAmount);
 
         IController targetController = IController(_targetController);
 
-        targetController.withdrawTokensFromSafe(msg.sender, activated, _amount, feeCoverage);
+        // Transfer requested tokens to withdrawer.
+        targetController.withdrawTokensFromSafe(msg.sender, _activated, _amount, feeCoverage);
 
-        (uint mintFeeChange, uint redemptionFeeChange) = token == _activeToken
-            ? (feeChange, uint(0))
-            : (0, feeChange);
-
-        // Lastly, update Safe params.
+        // Update Safe params.
         safeManagerContract.adjustSafeBal({
             _owner: msg.sender,
             _index: _index,
-            _activeToken: withdrawCache.activeToken,
+            _activeToken: cacheInit.activeToken,
             _amount: _amount,   // credits
             _add: false,
             _mintFeeApplied: mintFeeChange, // credits
@@ -262,8 +262,8 @@ contract SafeOperations {
         });
 
         // If Safe is empty then mark it as closed.
-        if (_amount == withdrawCache.bal) {
-            safeManagerContract.setSafeStatus(msg.sender, _index, withdrawCache.activeToken, 2);
+        if (_amount == cacheVal.bal) {
+            safeManagerContract.setSafeStatus(msg.sender, _index, cacheInit.activeToken, 2);
         }
     }
 
@@ -308,12 +308,23 @@ contract SafeOperations {
 
     }
 
-    function computeFeeChange(int _coverage, uint _feeApplied, uint _amount)
+    function computeFee(bool _activated, uint _mintFeeApplied, uint _redemptionFeeApplied, uint _amount)
         internal
         pure
-        returns (uint feeChange)
+        returns (int feeCoverage, uint mintFeeChange, uint redemptionFeeChange)
     {
-        feeChange = _coverage > 0 ? _feeApplied : _amount;
+        uint feeApplied = _activated == true
+            ? _mintFeeApplied
+            : _redemptionFeeApplied;
+
+        // If > 0, means that the user is "minting" or redeeming |feeCoverage| amount of tokens,
+        // for which they are required to pay minting fees.
+        feeCoverage = int(_amount - feeApplied);
+
+        uint feeChange = feeCoverage > 0 ? feeApplied : _amount;
+        (mintFeeChange, redemptionFeeChange) = _activated == true
+            ? (feeChange, uint(0))
+            : (0, feeChange);
     }
 
     /**

@@ -31,10 +31,29 @@ interface ISafeManager {
         Status status;
     }
 
-    function getSafe(
+    function getSafeInit(
         address _owner,
         uint _index
-    ) external view returns (address, address, address, uint, uint, uint, uint, uint, uint);
+    )
+        external
+        view
+        returns (address, address, address);
+
+        function getSafeVal(
+        address _owner,
+        uint _index
+    )
+        external
+        view
+        returns (uint, uint, uint, uint, uint);
+
+    function getSafeStatus(
+        address _owner,
+        uint _index
+    )  
+        external
+        view
+        returns (uint);
 
     function initializeSafe(
         address _owner,
