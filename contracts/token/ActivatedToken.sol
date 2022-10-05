@@ -2,9 +2,9 @@
 pragma solidity ^0.8.17;
 
 /**
- * @title USDSTa Token Contract
- * @dev ERC20 compatible contract for USDSTa
- * @dev Implements an elastic supply
+ * @title Activated Token Contract
+ * @dev ERC20 compatible contract for Activated Token.
+ * @dev Implements an elastic supply.
  * @author Origin Protocol Inc & The Stoa Corporation Ltd.
  * @notice
  *  Forked from
@@ -30,7 +30,7 @@ import { StableMath } from "../utils/StableMath.sol";
  * rebasing design. Any integrations with OUSD should be aware.
  */
 
-contract USDSTa is ERC20 {
+contract ActivatedToken is ERC20 {
     using SafeMath for uint256;
     using StableMath for uint256;
 
@@ -68,7 +68,10 @@ contract USDSTa is ERC20 {
      */
     address public controller;
 
-    constructor() ERC20("Stoa Activated Dollar", "USDSTa") {
+    constructor(
+        string memory _name,
+        string memory _symbol
+    ) ERC20(_name, _symbol) {
         _rebasingCreditsPerToken = 1e18;
     }
 
@@ -106,7 +109,7 @@ contract USDSTa is ERC20 {
      * @dev Verifies that the caller is the Vault contract
      */
     modifier onlyVault() {
-        require(vaultAddress == msg.sender, "Caller is not the Vault");
+        require(vaultAddress == msg.sender, "ActivatedToken: Caller is not the Vault");
         _;
     }
 
@@ -221,10 +224,10 @@ contract USDSTa is ERC20 {
         override
         returns (bool)
     {
-        require(_to != address(0), "Transfer to zero address");
+        require(_to != address(0), "ActivatedToken: Transfer to zero address");
         require(
             _value <= balanceOf(msg.sender),
-            "Transfer greater than balance"
+            "ActivatedToken: Transfer greater than balance"
         );
 
         _executeTransfer(msg.sender, _to, _value);
@@ -245,8 +248,8 @@ contract USDSTa is ERC20 {
         address _to,
         uint256 _value
     ) public override returns (bool) {
-        require(_to != address(0), "Transfer to zero address");
-        require(_value <= balanceOf(_from), "Transfer greater than balance");
+        require(_to != address(0), "ActivatedToken: Transfer to zero address");
+        require(_value <= balanceOf(_from), "ActivatedToken: Transfer greater than balance");
 
         _allowances[_from][msg.sender] = _allowances[_from][msg.sender].sub(
             _value
@@ -280,7 +283,7 @@ contract USDSTa is ERC20 {
 
         _creditBalances[_from] = _creditBalances[_from].sub(
             creditsDeducted,
-            "Transfer amount exceeds balance"
+            "ActivatedToken: Transfer amount exceeds balance"
         );
         _creditBalances[_to] = _creditBalances[_to].add(creditsCredited);
 
@@ -398,7 +401,7 @@ contract USDSTa is ERC20 {
      * - `to` cannot be the zero address.
      */
     function _mint(address _account, uint256 _amount) internal override nonReentrant {
-        require(_account != address(0), "Mint to the zero address");
+        require(_account != address(0), "ActivatedToken: Mint to the zero address");
 
         bool isNonRebasingAccount = _isNonRebasingAccount(_account);
 
@@ -415,7 +418,7 @@ contract USDSTa is ERC20 {
 
         _totalSupply = _totalSupply.add(_amount);
 
-        require(_totalSupply < MAX_SUPPLY, "Max supply");
+        require(_totalSupply < MAX_SUPPLY, "ActivatedToken: Max supply");
 
         emit Transfer(address(0), _account, _amount);
     }
@@ -440,7 +443,7 @@ contract USDSTa is ERC20 {
      * - `_account` must have at least `_amount` tokens.
      */
     function _burn(address _account, uint256 _amount) internal override nonReentrant {
-        require(_account != address(0), "Burn from the zero address");
+        require(_account != address(0), "ActivatedToken: Burn from the zero address");
         if (_amount == 0) {
             return;
         }
@@ -460,7 +463,7 @@ contract USDSTa is ERC20 {
                 creditAmount
             );
         } else {
-            revert("Remove exceeds balance");
+            revert("ActivatedToken: Remove exceeds balance");
         }
 
         // Remove from the credit tallies and non-rebasing supply
@@ -536,7 +539,7 @@ contract USDSTa is ERC20 {
      * to upside and downside.
      */
     function rebaseOptIn() public nonReentrant {
-        require(_isNonRebasingAccount(msg.sender), "Account has not opted out");
+        require(_isNonRebasingAccount(msg.sender), "ActivatedToken: Account has not opted out");
 
         // Convert balance into the same amount at the current exchange rate
         uint256 newCreditBalance = _creditBalances[msg.sender]
@@ -562,7 +565,7 @@ contract USDSTa is ERC20 {
      * @dev Explicitly mark that an address is non-rebasing.
      */
     function rebaseOptOut() public nonReentrant {
-        require(!_isNonRebasingAccount(msg.sender), "Account has not opted in");
+        require(!_isNonRebasingAccount(msg.sender), "ActivatedToken: Account has not opted in");
 
         // Increase non rebasing supply
         nonRebasingSupply = nonRebasingSupply.add(balanceOf(msg.sender));
@@ -587,7 +590,7 @@ contract USDSTa is ERC20 {
         // onlyVault
         nonReentrant
     {
-        require(_totalSupply > 0, "Cannot increase 0 supply");
+        require(_totalSupply > 0, "ActivatedToken: Cannot increase 0 supply");
 
         if (_totalSupply == _newTotalSupply) {
             emit TotalSupplyUpdatedHighres(
@@ -606,7 +609,7 @@ contract USDSTa is ERC20 {
             _totalSupply.sub(nonRebasingSupply)
         );
 
-        require(_rebasingCreditsPerToken > 0, "Invalid change in supply");
+        require(_rebasingCreditsPerToken > 0, "ActivatedToken: Invalid change in supply");
 
         _totalSupply = _rebasingCredits
             .divPrecisely(_rebasingCreditsPerToken)
@@ -632,15 +635,8 @@ contract USDSTa is ERC20 {
     function convertToAssets(
         uint _creditBalance
     ) public view returns (uint assets) {
-        require(_creditBalance > 0, "USDSTa: Credit balance must be greater than 0");
+        require(_creditBalance > 0, "ActivatedToken: Credit balance must be greater than 0");
         assets = _creditBalance.divPrecisely(_rebasingCreditsPerToken);
-    }
-
-    function convertToCredits(
-        uint _tokenBalance
-    ) public view returns (uint credits) {
-        require(_tokenBalance > 0, "USDSTa: Credit balance must be greater than 0");
-        credits = _tokenBalance.mulTruncate(_creditBalances[msg.sender]);
     }
 
     function sendToPool(uint _amount) external {}

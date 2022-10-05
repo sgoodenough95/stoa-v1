@@ -20,9 +20,9 @@ import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.s
 
 // import { Governable } from "../governance/Governable.sol";
 // import { Initializable } from "../utils/Initializable.sol";
-import { USDSTa } from "./USDSTa.sol";
+import { ActivatedToken } from "./ActivatedToken.sol";
 
-contract wUSDSTa is ERC4626 {
+contract wActivatedToken is ERC4626 {
     using SafeERC20 for IERC20;
 
     constructor(
@@ -39,11 +39,11 @@ contract wUSDSTa is ERC4626 {
     // }
 
     function rebaseOptIn() public {
-        USDSTa(address(asset())).rebaseOptIn();
+        ActivatedToken(address(asset())).rebaseOptIn();
     }
 
     function rebaseOptOut() public {
-        USDSTa(address(asset())).rebaseOptOut();
+        ActivatedToken(address(asset())).rebaseOptOut();
     }
 
     // function name() public view override returns (string memory) {

@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./interfaces/IController.sol";
 import "./interfaces/IActivated.sol";
 import "./interfaces/ISafeOperations.sol";
+import "./utils/Common.sol";
 
 /**
  * @dev
@@ -345,19 +346,19 @@ contract SafeManager {
         token.approve(_spender, type(uint).max);
     }
 
-    /**
-     * @dev
-     *  Function for updating token balances upon rebase.
-     *  Only callable from the target Controller of the activeToken.
-     *  Motivation in including this is that, when a rebase occurs, the respective Controller
-     *  updates this value. May later remove however and simply read from the
-     *  activeToken's ERC20 contract.
-     */
-    function updateRebasingCreditsPerToken(
-        address _activeToken
-    ) external returns (uint) {
-        address _controller = safeOperationsContract.getController(_activeToken);
-        require(msg.sender == _controller, "Only target Controller can call");
-        return rebasingCreditsPerActiveToken[_activeToken] = IActivated(_activeToken).rebasingCreditsPerToken();
-    }
+    // /**
+    //  * @dev
+    //  *  Function for updating token balances upon rebase.
+    //  *  Only callable from the target Controller of the activeToken.
+    //  *  Motivation in including this is that, when a rebase occurs, the respective Controller
+    //  *  updates this value. May later remove however and simply read from the
+    //  *  activeToken's ERC20 contract.
+    //  */
+    // function updateRebasingCreditsPerToken(
+    //     address _activeToken
+    // ) external returns (uint) {
+    //     address _controller = safeOperationsContract.getController(_activeToken);
+    //     require(msg.sender == _controller, "Only target Controller can call");
+    //     return rebasingCreditsPerActiveToken[_activeToken] = IActivated(_activeToken).rebasingCreditsPerToken();
+    // }
 }

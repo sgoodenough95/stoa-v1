@@ -9,6 +9,7 @@ import "./interfaces/IVaultWrapper.sol";
 import "./interfaces/IActivated.sol";
 import "./interfaces/IUnactivated.sol";
 import "./interfaces/ISafeManager.sol";
+import "./utils/Common.sol";
 
 /**
  * @notice
@@ -157,15 +158,6 @@ contract Controller is Ownable {
         activeTokenContractERC20.approve(address(this), type(uint).max);
 
         inputTokenContract.approve(address(vault), type(uint).max);
-    }
-
-    // Later add to common functions / helper contract (?)
-    function rebaseOptIn() public {
-        activeTokenContract.rebaseOptIn();
-    }
-
-    function rebaseOptOut() public {
-        activeTokenContract.rebaseOptOut();
     }
 
     /**
@@ -438,7 +430,7 @@ contract Controller is Ownable {
         }
 
         // Not sure if needed, as SafeManager can get balance from activeToken contract (?)
-        safeManagerContract.updateRebasingCreditsPerToken(activeToken);
+        // safeManagerContract.updateRebasingCreditsPerToken(activeToken);
     }
 
     function totalValue()

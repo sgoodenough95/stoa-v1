@@ -80,5 +80,5 @@ interface ISafeManager {
         uint _num
     ) external;
 
-    function updateRebasingCreditsPerToken(address _inputToken) external view returns (uint);
+    // function updateRebasingCreditsPerToken(address _inputToken) external view returns (uint);
 }
