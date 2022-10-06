@@ -36,6 +36,7 @@ contract Controller is Ownable {
     address safeManager;
     address activeToken;
     address unactiveToken;
+    address inputToken;
 
     /**
      * @dev
@@ -89,6 +90,9 @@ contract Controller is Ownable {
     uint public amountDeposited;
     uint public amountWithdrawn;
     uint public accruedYield;
+    uint public yieldAccrued;
+    uint public holderYieldAccrued;
+    uint public stoaYieldAccrued;
 
     /**
      * @notice Fees in basis points (e.g., 30 = 0.3%).
@@ -164,7 +168,7 @@ contract Controller is Ownable {
      * @notice
      *  Deposits inputTokens into vault and issues Stoa tokens.
      * @dev
-     *  Callable either directly from user (custodial) or SafeOperations (non-custodial).
+     *  Callable either directly from user (non-custodial) or SafeOperations (custodial).
      *  Accepts supported inputTokens.
      * @param _depositor The soon-to-be owner of the activeTokens or unactiveTokens.
      * @param _amount The amount of inputTokens to deposit.
@@ -189,7 +193,7 @@ contract Controller is Ownable {
         // Approve _inputTokenContract first before initiating transfer
         // for vault to spend (transfer directly from depositor to vault)
 
-        // Directly transfer from depositor to vault.
+        // Directly transfers from depositor to vault.
         // (Requires additional argument in deposit() of VaultWrapper: depositor).
         vault.deposit(_amount, address(this), _depositor);
         amountDeposited += _amount;
@@ -234,8 +238,6 @@ contract Controller is Ownable {
      *  Simply transfers activeToken from user to this address and marks
      *  as unspendable.
      *  Excess activeTokens such as those generated from the yield are spendable.
-     * @dev
-     *  May need to experiement with transferFrom of rebasing token contract.
      * @param _amount The amount of activeTokens to convert.
      * @return mintAmount The amount of unactiveTokens received.
      */
@@ -277,17 +279,21 @@ contract Controller is Ownable {
         nonReentrant
         returns (uint redemptionAmount)
     {
-        require(
-            unactiveRedemptionAllowance[msg.sender] >= _amount,
-            "Controller: Insufficient unactive token redemption allowance"
-        );
-        require(
-            unactiveTokenContractERC20.balanceOf(msg.sender) >= _amount,
-            "Controller: Insufficient balance"
-        );
+        // Enables Stoa to stabilise the unactiveToken price if need be.
+        redemptionAmount = _amount;
+        if (msg.sender != owner()) {
+            require(
+                unactiveRedemptionAllowance[msg.sender] >= _amount,
+                "Controller: Insufficient unactive token redemption allowance"
+            );
+            require(
+                unactiveTokenContractERC20.balanceOf(msg.sender) >= _amount,
+                "Controller: Insufficient balance"
+            );
 
-        uint _redemptionFee = computeFee(_amount, false);
-        redemptionAmount = _amount - _redemptionFee;
+            uint _redemptionFee = computeFee(_amount, false);
+            redemptionAmount = _amount - _redemptionFee;
+        }
 
         // Burn the user's unactive tokens.
         unactiveTokenContract.burn(msg.sender, _amount);
@@ -312,11 +318,11 @@ contract Controller is Ownable {
 
     /**
      * @notice
-     *  Enables caller to redeem underlying asset(s) for activeTokens.
-     *  unactiveTokens can only be redeemed via the Activator contract.
+     *  Enables caller to redeem underlying asset(s) by burning activeTokens.
+     *  unactiveTokens can only be redeemed via the Activator contract if the
+     *  caller has an insufficient unactive redemption allowance.
      * @dev
-     *  Need to handle allocation of inputTokens received by the user if
-     *  managing multiple vaults.
+     *  May later need to adapt if handling multiple inputTokens (e.g., DAI + USDC).
      * @param _withdrawer The address to receive inputTokens.
      * @param _amount The amount of activeTokens transferred by the caller (in tokens).
      * @return amount The amount of inputTokens redeemed from the vault.
@@ -352,7 +358,7 @@ contract Controller is Ownable {
      * @notice
      *  Admin function to withdraw tokens from Vault.
      *  May be used in case of emergency or a better yield opportunity
-     *  exists for a correlated input Token.
+     *  exists for the inputToken.
      */
     function adminWithdraw(uint _amount, bool _max)
         external
@@ -405,32 +411,35 @@ contract Controller is Ownable {
 
     function rebase()
         external
-        returns (uint yield, uint userYield, uint stoaYield)
+        returns (uint yield, uint holderYield, uint stoaYield)
     {
-        uint256 activeTokenContractSupply = IERC20(activeToken).totalSupply();
+        uint activeTokenContractSupply = IERC20(activeToken).totalSupply();
         if (activeTokenContractSupply == 0) {
             return (0, 0, 0);
         }
 
         // Get Vault value.
-        uint256 vaultValue = totalValue();
+        uint vaultValue = totalValue();
 
         // Can add logic for Keeper rewards here.
 
-        // Update supply accordingly. Take 10% cut of yield.
+        // Update supply accordingly. Take mgmtFee cut of yield.
         if (vaultValue > activeTokenContractSupply) {
 
-            // What logic here (?)
             yield = vaultValue - activeTokenContractSupply;
-            userYield = (yield / 10_000) * (10_000 - mgmtFee);
-            stoaYield = yield - userYield;
+            holderYield = (yield / 10_000) * (10_000 - mgmtFee);
+            stoaYield = yield - holderYield;
 
             // We want the activeToken supply to mirror the size of the vault.
-            activeTokenContract.changeSupply(vaultValue);
-        }
+            activeTokenContract.changeSupply(activeTokenContractSupply + holderYield);
+            if (stoaYield > 0) {
+                activeTokenContract.mint(address(this), stoaYield);
+            }
 
-        // Not sure if needed, as SafeManager can get balance from activeToken contract (?)
-        // safeManagerContract.updateRebasingCreditsPerToken(activeToken);
+            yieldAccrued += yield;
+            holderYieldAccrued += holderYield;
+            stoaYieldAccrued += stoaYield;
+        }
     }
 
     function totalValue()
@@ -465,6 +474,14 @@ contract Controller is Ownable {
         returns (address _activeToken)
     {
         _activeToken = activeToken;
+    }
+
+    function getInputToken()
+        public
+        view
+        returns (address _inputToken)
+    {
+        _inputToken = inputToken;
     }
 
     // Needs amending if storing activeToken in Controller for Safes.

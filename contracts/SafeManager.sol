@@ -103,14 +103,14 @@ contract SafeManager {
         // Might not necessarily know this when opening a Safe.
         address debtToken;
         // activeToken creditBalance;
-        uint bal;
+        uint bal;   // credits
         // Increments only if depositing activeToken.
-        uint mintFeeApplied;
-        uint redemptionFeeApplied;
+        uint mintFeeApplied;    // credits
+        uint redemptionFeeApplied;  // tokens
         // Balance of the debtToken.
-        uint debt;
+        uint debt;  // tokens
         // Amount of activeTokens locked as collateral.
-        uint locked;
+        uint locked;    // credits
         uint index;
         Status status;
     }
@@ -195,6 +195,7 @@ contract SafeManager {
         safe[_owner][_index].index = _index;
         safe[_owner][_index].status = Status(1);
 
+        // Increment index (this will be used for the next Safe the user opens).
         currentSafeIndex[_owner] += 1;
     }
 
@@ -341,7 +342,12 @@ contract SafeManager {
     //     // liquidation logic.
     // }
 
-    function approveToken(address _token, address _spender) external {
+    /**
+     * @dev Required to call when withdrawing activeTokens, for e.g.
+     */
+    function approveToken(address _token, address _spender)
+        external
+    {
         IERC20 token = IERC20(_token);
         token.approve(_spender, type(uint).max);
     }

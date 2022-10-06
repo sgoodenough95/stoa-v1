@@ -9,8 +9,10 @@ import "./interfaces/IActivated.sol";
 /**
  * @dev
  *  Stores Safe data in and makes calls to SafeManager contract.
- *  Calls mint/burn of 'unactivated' tokens upon borrow/repay.
- *  Can deposit Stoa tokens into StabilityPool contract.
+ *  Stores token-Controller mapping.
+ *  Calls mint/burn of unactivated tokens upon borrow/repay.
+ *  Moves liquidatable collateral to ActivePool.
+ *  Enables depositing into StabilityPool directly from Safe.
  * @notice
  *  Contains user-operated functions for managing Safes.
  */
@@ -22,6 +24,10 @@ contract SafeOperations {
 
     mapping(address => address) public tokenToController;
 
+    /**
+     * @dev
+     *  Later use for self-repaying loan logic.
+     */
     mapping(address => bool) public isActiveToken;
 
     mapping(address => address) public activeToInputToken;
@@ -64,61 +70,64 @@ contract SafeOperations {
 
     /**
      * @dev
-     *  Returns the controller for a given inputToken.
+     *  Returns the controller for a given token (inputToken or activeToken).
      *  TBD whether this is handled by a separate Router contract.
      * @return address The address of the target controller.
      */
-    function getController(address _inputToken)
+    function getController(address _token)
         external
         view
         returns (address)
     {
-        return tokenToController[_inputToken];
+        return tokenToController[_token];
     }
 
     /**
      * @dev
-     *  Transfers inputTokens from caller to target Controller (unless inputToken is an activeToken,
-     *  in which case transfers inputTokens directly to SafeManager).
+     *  Transfers tokens from caller to target Controller (unless the token is an activeToken,
+     *  in which case transfers directly to SafeManager).
      *  Require a separate function / add-on to allow borrowing also in one tx
      *  (or just call both functions ?)
      * @notice User-facing function for opening a Safe.
-     * @param _inputToken The address of the inputToken. Must be supported.
-     * @param _amount The amount of inputTokens to deposit.
+     * @param _token The address of the token. Must be supported.
+     * @param _amount The amount of tokens to deposit.
      */
-    function openSafe(address _inputToken, uint _amount)
+    function openSafe(address _token, uint _amount)
         external
     {
-        // E.g., _inputToken = DAI.
-        if (isActiveToken[_inputToken] == false) {
-            // First, check if a Controller exists for the inputToken.
-            require(tokenToController[_inputToken] != address(0), "SafeOps: Controller not found");
+        // First, check if a Controller exists for the token.
+        require(tokenToController[_token] != address(0), "SafeOps: Controller not found");
 
-            IController targetController = IController(tokenToController[_inputToken]);
+        // E.g., _token = DAI.
+        if (validInputToken(_token)) {
 
-            address _activeToken = targetController.getActiveToken();
+            IController targetController = IController(tokenToController[_token]);
 
+            address activeToken = targetController.getActiveToken();
+
+            // Need to approve Vault spend for token first.
             targetController.deposit(msg.sender, _amount, true);
 
             safeManagerContract.initializeSafe({
                 _owner: msg.sender,
-                _activeToken: _activeToken,
+                _activeToken: activeToken,
                 _amount: _amount,   // Do not apply mintFee, hence stays as _amount.
                 _mintFeeApplied: 0,
                 _redemptionFeeApplied: _amount
             });
         }
-        // E.g., _inputToken = USDSTa.
+        // E.g., _token = USDSTa.
         else {
-            IERC20 inputToken = IERC20(_inputToken);
+            require(validActiveToken(_token));
 
-            // Approve _inputToken first before initiating transfer
-            SafeERC20.safeTransferFrom(inputToken, msg.sender, safeManager, _amount);
+            IActivated activeToken = IActivated(_token);
+
+            // Need to approve SafeOperations spend for token first.
+            activeToken.transferFrom(msg.sender, safeManager, _amount);
 
             safeManagerContract.initializeSafe({
                 _owner: msg.sender,
-                // _inputToken is already an activeToken (e.g., USDSTa).
-                _activeToken: _inputToken,
+                _activeToken: _token,
                 _amount: _amount,
                 _mintFeeApplied: _amount,   // Mark mintFee as already paid for.
                 _redemptionFeeApplied: 0
@@ -130,68 +139,56 @@ contract SafeOperations {
      * @notice
      *  Safe owners can deposit either activeTokens or inputTokens (e.g., USDSTa or DAI).
      *  Can only deposit if the Safe supports that token.
-     * @param _inputToken The inputted token (e.g., DAI, USDSTa, etc.).
+     * @param _token The token to deposit (e.g., DAI, USDSTa, etc.).
      * @param _index Identifier for the Safe.
      * @param _amount The amount to deposit.
      */
-    function depositToSafe(address _inputToken, uint _index, uint _amount)
+    function depositToSafe(address _token, uint _index, uint _amount)
         external
     {
-        // E.g., _inputToken = DAI.
-        if (isActiveToken[_inputToken] == false) {
-            require(tokenToController[_inputToken] != address(0), "SafeOps: Controller not found");
+        // First, check if a Controller exists for the token.
+        require(tokenToController[_token] != address(0), "SafeOps: Controller not found");
 
-            IController targetController = IController(tokenToController[_inputToken]);
+        // E.g., _token = DAI.
+        if (validInputToken(_token)) {
 
-            address _activeToken = targetController.getActiveToken();
+            IController targetController = IController(tokenToController[_token]);
+
+            address activeToken = targetController.getActiveToken();
 
             targetController.deposit(msg.sender, _amount, true);
 
             safeManagerContract.adjustSafeBal({
                 _owner: msg.sender,
                 _index: _index,
-                _activeToken: _activeToken,
+                _activeToken: activeToken,
                 _amount: _amount,
                 _add: true,
                 _mintFeeApplied: 0,
                 _redemptionFeeApplied: _amount
             });
         }
-        // E.g., _inputToken = USDSTa.
+        // E.g., _token = USDSTa.
         else {
-            IERC20 inputToken = IERC20(_inputToken);
+            require(validActiveToken(_token));
 
-            // Approve _inputToken first before initiating transfer
-            SafeERC20.safeTransferFrom(inputToken, msg.sender, safeManager, _amount);
+            IActivated activeToken = IActivated(_token);
+
+            // Need to approve SafeOperations spend for token first.
+            activeToken.transferFrom(msg.sender, safeManager, _amount);
 
             safeManagerContract.adjustSafeBal({
                 _owner: msg.sender,
                 _index: _index,
-                _activeToken: _inputToken,
+                _activeToken: _token,
                 _amount: _amount,
                 _add: true,
                 _mintFeeApplied: _amount,
                 _redemptionFeeApplied: 0
             });
         }
-        // For now, do not accept unactiveTokens as inputTokens.
+        // For now at least, do not allow unactiveToken deposits.
     }
-
-    // function withdrawTokens(address _activeToken, address _inputToken, uint _index, uint _amount)
-    //     external
-    // {
-    //     // XOR operation enforcing selection of activeToken or inputToken.
-    //     require(
-    //         _activeToken == address(0) && _inputToken != address(0) ||
-    //         _activeToken != address(0) && _inputToken == address(0)
-    //     );
-    //     (address token, bool activated) = _activeToken == address(0)
-    //         ? (_inputToken, false)
-    //         : (_activeToken, true);
-    //     require(tokenToController[token] != address(0), "SafeOps: Controller not found");
-
-    //     withdrawTokens(activated, _index, _amount);
-    // }
 
     /**
      * @notice
@@ -225,10 +222,10 @@ contract SafeOperations {
         require(msg.sender == cacheInit.owner, "SafeOps: Owner mismatch");
         require(_amount <= cacheVal.bal, "SafeOps: Insufficient Safe balance");
 
-        IActivated activeTokenContract = IActivated(cacheInit.activeToken);
+        IActivated activeToken = IActivated(cacheInit.activeToken);
 
         // Safe bal is in creditBalances, so need to estimate equivalent token balance.
-        uint tokenAmount = activeTokenContract.convertToAssets(_amount);
+        uint tokenAmount = activeToken.convertToAssets(_amount);
 
         (int feeCoverage, uint mintFeeChange, uint redemptionFeeChange) = computeFee(
             _activated,
@@ -240,10 +237,9 @@ contract SafeOperations {
         // Locate the activeToken's Controller.
         address _targetController = tokenToController[cacheInit.activeToken];
 
-        IERC20 activeTokenContractERC20 = IERC20(cacheInit.activeToken);
-
         // Transfer activeTokens to the Controller to be able to service the withdrawal.
-        SafeERC20.safeTransferFrom(activeTokenContractERC20, safeManager, _targetController, tokenAmount);
+        // Need to approve SafeOperations spend (for SafeManager) for token first.
+        activeToken.transferFrom(safeManager, _targetController, tokenAmount);
 
         IController targetController = IController(_targetController);
 
@@ -306,6 +302,36 @@ contract SafeOperations {
         external
     {
 
+    }
+
+    /**
+     * @dev
+     *  Want a single source of truth, hence validate with Controller.
+     */
+    function validActiveToken(address _activeToken)
+        internal
+        view
+        returns (bool)
+    {
+        IController targetController = IController(tokenToController[_activeToken]);
+
+        if (_activeToken == targetController.getActiveToken()) return true;
+        else return false;
+    }
+
+    /**
+     * @dev
+     *  For now, have 2 separate functions for validating input and active tokens.
+     */
+    function validInputToken(address _inputToken)
+        internal
+        view
+        returns (bool)
+    {
+        IController targetController = IController(tokenToController[_inputToken]);
+
+        if (_inputToken == targetController.getInputToken()) return true;
+        else return false;
     }
 
     function computeFee(bool _activated, uint _mintFeeApplied, uint _redemptionFeeApplied, uint _amount)

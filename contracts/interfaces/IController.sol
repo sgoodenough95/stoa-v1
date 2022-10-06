@@ -18,5 +18,7 @@ interface IController {
 
     function withdrawTokensFromSafe(address _withdrawer, bool _activated, uint _amount, int _feeCoverage) external returns (uint amount);
 
-    function getActiveToken() external view returns (address activeToken);
+    function getActiveToken() external view returns (address _activeToken);
+
+    function getInputToken() external view returns (address _inputToken);
 }
