@@ -2,10 +2,11 @@
 pragma solidity ^0.8.17;
 
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "./interfaces/IController.sol";
 import "./interfaces/IActivated.sol";
 import "./interfaces/ISafeOperations.sol";
-import "./utils/Common.sol";
+import { RebaseOpt } from "./utils/RebaseOpt.sol";
 
 /**
  * @dev
@@ -19,11 +20,9 @@ import "./utils/Common.sol";
  *  Does not hold 'unactivated' tokens as they have no functionality as a Safe asset, but
  *  are purely debt tokens (similar to Dai's Vaults).
  */
-contract SafeManager {
+contract SafeManager is RebaseOpt, ReentrancyGuard {
 
     address public safeOperations;
-
-    ISafeOperations safeOperationsContract = ISafeOperations(safeOperations);
 
     /**
      * @dev
@@ -121,9 +120,9 @@ contract SafeManager {
         _;
     }
 
-    constructor(
-        address _safeOperations
-    ) {
+    function setSafeOps(address _safeOperations)
+        external
+    {
         safeOperations = _safeOperations;
     }
 
@@ -334,6 +333,7 @@ contract SafeManager {
 
     // function liquidateSafe(address _owner, uint _index)
     //     external
+    //     nonReentrant
     // {
     //     require(
     //         this.isUnderwater(_owner, _index),

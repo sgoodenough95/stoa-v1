@@ -2,6 +2,7 @@
 pragma solidity ^0.8.17;
 
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "./interfaces/IController.sol";
 import "./interfaces/ISafeManager.sol";
 import "./interfaces/IActivated.sol";
@@ -16,7 +17,7 @@ import "./interfaces/IActivated.sol";
  * @notice
  *  Contains user-operated functions for managing Safes.
  */
-contract SafeOperations {
+contract SafeOperations is ReentrancyGuard {
 
     address safeManager;
 
@@ -48,24 +49,9 @@ contract SafeOperations {
 
     uint cacheStatus;
 
-    // Reentrancy Guard logic.
-    uint256 private constant _NOT_ENTERED = 1;
-    uint256 private constant _ENTERED = 2;
-    uint256 private _status = _NOT_ENTERED;
-
-    modifier nonReentrant()
-    {
-        // On the first call to nonReentrant, _notEntered will be true
-        require(_status != _ENTERED, "ReentrancyGuard: reentrant call");
-
-        // Any calls to nonReentrant after this point will fail
-        _status = _ENTERED;
-
-        _;
-
-        // By storing the original value once again, a refund is triggered (see
-        // https://eips.ethereum.org/EIPS/eip-2200)
-        _status = _NOT_ENTERED;
+    constructor(address _safeManager) {
+        safeManager = _safeManager;
+        safeManagerContract = ISafeManager(safeManager);
     }
 
     /**
@@ -94,6 +80,7 @@ contract SafeOperations {
      */
     function openSafe(address _token, uint _amount)
         external
+        nonReentrant
     {
         // First, check if a Controller exists for the token.
         require(tokenToController[_token] != address(0), "SafeOps: Controller not found");
@@ -145,6 +132,7 @@ contract SafeOperations {
      */
     function depositToSafe(address _token, uint _index, uint _amount)
         external
+        nonReentrant
     {
         // First, check if a Controller exists for the token.
         require(tokenToController[_token] != address(0), "SafeOps: Controller not found");
@@ -200,6 +188,7 @@ contract SafeOperations {
      */
     function withdrawTokens(bool _activated, uint _index, uint _amount)
         external
+        nonReentrant
     {
         CacheInit memory cacheInit;
 
@@ -271,12 +260,14 @@ contract SafeOperations {
 
     function borrow(uint _amount)
         external
+        nonReentrant
     {
 
     }
 
     function repay(uint _amount)
         external
+        nonReentrant
     {
 
     }
@@ -289,6 +280,7 @@ contract SafeOperations {
         uint _toIndex
     )
         external
+        nonReentrant
     {
 
     }
@@ -300,6 +292,7 @@ contract SafeOperations {
         uint _newIndex
     )
         external
+        nonReentrant
     {
 
     }
@@ -356,9 +349,9 @@ contract SafeOperations {
     /**
      * @dev Admin function to set the Controller of a given inputToken.
      */
-    function setController(address _inputToken, address _controller)
+    function setController(address _token, address _controller)
         external
     {
-        tokenToController[_inputToken] = _controller;
+        tokenToController[_token] = _controller;
     }
 }

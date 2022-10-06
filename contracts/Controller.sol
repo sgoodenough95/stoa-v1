@@ -3,13 +3,14 @@ pragma solidity ^0.8.17;
 
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
-// import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "./interfaces/IERC4626.sol";
 import "./interfaces/IVaultWrapper.sol";
 import "./interfaces/IActivated.sol";
 import "./interfaces/IUnactivated.sol";
 import "./interfaces/ISafeManager.sol";
-import "./utils/Common.sol";
+import { RebaseOpt } from "./utils/RebaseOpt.sol";
+import { Common } from "./utils/Common.sol";
 
 /**
  * @notice
@@ -30,9 +31,8 @@ import "./utils/Common.sol";
  *  Calls 'changeSupply()' of activeToken contract upon successful rebase.
  *  Drips (makes yield available) to Activator contract.
  */
-contract Controller is Ownable {
+contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
 
-    address safeOperations;
     address safeManager;
     address activeToken;
     address unactiveToken;
@@ -107,32 +107,6 @@ contract Controller is Ownable {
     uint256 MIN_AMOUNT = 20e18; // $20
     uint256 private dust = 1e16;
 
-    // Reentrancy Guard logic.
-    uint256 private constant _NOT_ENTERED = 1;
-    uint256 private constant _ENTERED = 2;
-    uint256 private _status = _NOT_ENTERED;
-
-    modifier onlySafeOps()
-    {
-        require(msg.sender == safeOperations, "SafeManager: Only SafeOps can call");
-        _;
-    }
-
-    modifier nonReentrant()
-    {
-        // On the first call to nonReentrant, _notEntered will be true
-        require(_status != _ENTERED, "ReentrancyGuard: reentrant call");
-
-        // Any calls to nonReentrant after this point will fail
-        _status = _ENTERED;
-
-        _;
-
-        // By storing the original value once again, a refund is triggered (see
-        // https://eips.ethereum.org/EIPS/eip-2200)
-        _status = _NOT_ENTERED;
-    }
-
     /**
      * @dev Set initial values and approvals.
      */
@@ -148,6 +122,8 @@ contract Controller is Ownable {
         activeToken = _activeToken;
 
         unactiveToken = _unactiveToken;
+
+        inputToken = _inputToken;
 
         activeTokenContract = IActivated(activeToken);
 
