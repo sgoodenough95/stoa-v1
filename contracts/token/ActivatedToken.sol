@@ -50,7 +50,7 @@ contract ActivatedToken is ERC20 {
     uint256 public _totalSupply;
     mapping(address => mapping(address => uint256)) private _allowances;
     address public vaultAddress = address(0);
-    mapping(address => uint256) private _creditBalances;
+    mapping(address => uint256) public _creditBalances;
     uint256 private _rebasingCredits;
     uint256 private _rebasingCreditsPerToken;
     // Frozen address/credits are non rebasing (value is held in contracts which
@@ -635,8 +635,22 @@ contract ActivatedToken is ERC20 {
     function convertToAssets(
         uint _creditBalance
     ) public view returns (uint assets) {
-        require(_creditBalance > 0, "ActivatedToken: Credit balance must be greater than 0");
-        assets = _creditBalance.divPrecisely(_rebasingCreditsPerToken);
+        assets = _creditBalance == 0
+            ? 0
+            : _creditBalance.divPrecisely(_rebasingCreditsPerToken);
+    }
+
+    /**
+     * @dev Helper function to convert token balance to credit balance.
+     * @param _tokenBalance The token balance to convert.
+     * @return credits The amount converted to credit balance.
+     */
+    function convertToCredits(
+        uint _tokenBalance
+    ) public view returns (uint credits) {
+        credits = _tokenBalance == 0
+            ? 0
+            : _tokenBalance.mulTruncate(_rebasingCreditsPerToken);
     }
 
     function sendToPool(uint _amount) external {}

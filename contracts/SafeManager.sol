@@ -7,6 +7,7 @@ import "./interfaces/IController.sol";
 import "./interfaces/IActivated.sol";
 import "./interfaces/ISafeOperations.sol";
 import { RebaseOpt } from "./utils/RebaseOpt.sol";
+import { Common } from "./utils/Common.sol";
 
 /**
  * @dev
@@ -20,9 +21,7 @@ import { RebaseOpt } from "./utils/RebaseOpt.sol";
  *  Does not hold 'unactivated' tokens as they have no functionality as a Safe asset, but
  *  are purely debt tokens (similar to Dai's Vaults).
  */
-contract SafeManager is RebaseOpt, ReentrancyGuard {
-
-    address public safeOperations;
+contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
 
     /**
      * @dev
@@ -112,18 +111,6 @@ contract SafeManager is RebaseOpt, ReentrancyGuard {
         uint locked;    // credits
         uint index;
         Status status;
-    }
-
-    modifier onlySafeOps()
-    {
-        require(msg.sender == safeOperations, "SafeManager: Only SafeOps can call");
-        _;
-    }
-
-    function setSafeOps(address _safeOperations)
-        external
-    {
-        safeOperations = _safeOperations;
     }
 
     /**

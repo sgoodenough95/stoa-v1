@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity ^0.8.17;
 
+import "hardhat/console.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
@@ -33,10 +34,10 @@ import { Common } from "./utils/Common.sol";
  */
 contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
 
-    address safeManager;
-    address activeToken;
-    address unactiveToken;
-    address inputToken;
+    address public safeManager;
+    address public activeToken;
+    address public unactiveToken;
+    address public inputToken;
 
     /**
      * @dev
@@ -172,6 +173,12 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
         // Directly transfers from depositor to vault.
         // (Requires additional argument in deposit() of VaultWrapper: depositor).
         vault.deposit(_amount, address(this), _depositor);
+        console.log(
+            "%s deposited %s to Vault on behalf of %s",
+            address(this),
+            _amount,
+            _depositor
+        );
         amountDeposited += _amount;
 
         uint _mintFee = computeFee(_amount, true);
@@ -181,25 +188,40 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
         if (_activated == true) {
             if (msg.sender == safeOperations) {
                 activeTokenContract.mint(safeManager, _amount);
+                console.log(
+                    "Minted %s activeTokens to SafeManager", _amount
+                );
 
                 // Do not apply mintFee if opening a Safe.
                 mintAmount = _amount;
             } else {
                 activeTokenContract.mint(msg.sender, mintAmount);
+                console.log(
+                    "Minted %s activeTokens to User", mintAmount
+                );
 
                 // Capture mintFee.
                 activeTokenContract.mint(address(this), _mintFee);
+                console.log(
+                    "Minted %s activeTokens to Controller", _mintFee
+                );
             }
 
         // E.g., DAI => USDST.
         } else {
             activeTokenContract.mint(address(this), _amount);
+            console.log(
+                "Minted %s backing activeTokens to Controller", _amount
+            );
 
             // The user's unactiveTokens are backed by the activeTokens minted
             // to the Controller.
             // This enables the Controller to engage in actions such as depositing
             // to the Stability Pool (with the mintFee plus yield earned).
             unactiveTokenContract.mint(msg.sender, mintAmount);
+            console.log(
+                "Minted %s unactiveTokens to User", mintAmount
+            );
 
             // Unspendable tokens used to back unactiveTokens.
             activeTokenBackingReserve += mintAmount;
@@ -231,6 +253,11 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
         mintAmount = _amount - _mintFee;
 
         activeTokenContract.transferFrom(msg.sender, address(this), _amount);
+        console.log(
+            "Transferred %s activeTokens, for backing, from %s to Controller",
+            _amount,
+            msg.sender
+        );
 
         // Controller captures mintFee amount + future yield earned.
         activeTokenBackingReserve += mintAmount;
@@ -239,6 +266,10 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
         unactiveRedemptionAllowance[msg.sender] += mintAmount;
 
         unactiveTokenContract.mint(msg.sender, mintAmount);
+        console.log(
+            "Minted %s unactiveTokens to User",
+            mintAmount
+        );
     }
 
     /**
@@ -256,6 +287,7 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
         returns (uint redemptionAmount)
     {
         // Enables Stoa to stabilise the unactiveToken price if need be.
+        // Need to ensure this does not leave a redemption imbalance (?)
         redemptionAmount = _amount;
         if (msg.sender != owner()) {
             require(
@@ -273,17 +305,35 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
 
         // Burn the user's unactive tokens.
         unactiveTokenContract.burn(msg.sender, _amount);
+        console.log(
+            "Burned %s unactiveTokens from User",
+            _amount
+        );
 
         if (_activated == true) {
             activeTokenContract.transfer(msg.sender, redemptionAmount);
+            console.log(
+                "Transferred %s activeTokens from Controller to User",
+                redemptionAmount
+            );
 
         } else {
             // Stoa retains redemptionFee amount of activeToken.
             activeTokenContract.burn(address(this), redemptionAmount);
+            console.log(
+                "Burned %s activeTokens from Controller",
+                redemptionAmount
+            );
 
             // Withdraw input token from Vault and send to withdrawer.
             uint _shares = vault.convertToShares(redemptionAmount);
             vault.redeem(_shares, msg.sender, address(this));
+            console.log(
+                "Controller redeemed %s inputTokens / %s shares from Vault on behalf of %s",
+                redemptionAmount,
+                _shares,
+                msg.sender
+            );
 
             amountWithdrawn += _amount;
         }
@@ -319,13 +369,28 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
 
         // Approve _inputTokenContract first before initiating transfer
         activeTokenContract.transferFrom(msg.sender, address(this), _amount);
+        console.log(
+            "Transferred %s activeTokens from %s to Controller",
+            _amount,
+            msg.sender
+        );
 
         // Stoa retains redemptionFee amount of activeToken.
         activeTokenContract.burn(address(this), redemptionAmount);
+        console.log(
+            "Burned %s activeTokens from Controller",
+            redemptionAmount
+        );
 
         // Withdraw input token from Vault and send to withdrawer.
         uint _shares = vault.convertToShares(redemptionAmount);
         amount = vault.redeem(_shares, _withdrawer, address(this));
+        console.log(
+            "Controller redeemed %s inputTokens / %s shares from Vault on behalf of %s",
+            redemptionAmount,
+            _shares,
+            _withdrawer
+        );
 
         amountWithdrawn += _amount;
     }
@@ -359,27 +424,42 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
      * @param _withdrawer The address to send inputTokens to.
      * @param _activated Indicates if withdrawing activeTokens (if not, then inputTokens).
      * @param _amount The amount of activeTokens to exchange for inputTokens (in tokens, not credits).
-     * @param _feeCoverage The amount for which to charge minting or redemption fees (if negative).
+     * @param _feeCoverage The amount for which to charge minting or redemption fees (if positive).
      */
     function withdrawTokensFromSafe(address _withdrawer, bool _activated, uint _amount, int _feeCoverage)
         external
         onlySafeOps
-        returns (uint amount)
+        returns (uint amount, uint fee, uint _shares)
     {
-        uint fee = _feeCoverage <= 0 ? 0 : computeFee(_amount, _activated);
+        fee = _feeCoverage <= 0 ? 0 : computeFee(uint(_feeCoverage), _activated);
 
         amount = _amount - fee;
 
         if (_activated == true) {
             activeTokenContract.transfer(_withdrawer, amount);
+            console.log(
+                "Transferred %s activeTokens from Controller to %s",
+                amount,
+                _withdrawer
+            );
         } else {
             // transferFrom to Controller already executed by SafeOps.
             // Stoa retains redemptionFee amount of activeToken (if not 0).
             activeTokenContract.burn(address(this), amount);
+            console.log(
+                "Burned %s activeTokens from Controller",
+                amount
+            );
 
             // Withdraw input token from Vault and send to withdrawer.
-            uint _shares = vault.convertToShares(amount);
+            _shares = vault.convertToShares(amount);
             amount = vault.redeem(_shares, _withdrawer, address(this));
+            console.log(
+                "Controller redeemed %s inputTokens / %s shares from Vault on behalf of %s",
+                amount,
+                _shares,
+                _withdrawer
+            );
 
             amountWithdrawn += _amount;
         }
@@ -396,6 +476,10 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
 
         // Get Vault value.
         uint vaultValue = totalValue();
+        console.log(
+            "Total value in Vault: %s",
+            vaultValue
+        );
 
         // Can add logic for Keeper rewards here.
 
@@ -408,8 +492,13 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
 
             // We want the activeToken supply to mirror the size of the vault.
             activeTokenContract.changeSupply(activeTokenContractSupply + holderYield);
+            console.log("Changed supply");
             if (stoaYield > 0) {
                 activeTokenContract.mint(address(this), stoaYield);
+                console.log(
+                    "Minted %s management fee to Controller",
+                    stoaYield
+                );
             }
 
             yieldAccrued += yield;
@@ -470,15 +559,31 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
             activeTokenContractERC20.balanceOf(address(this)) - activeTokenBackingReserve;
     }
 
-    function adjustMintFee(uint _newFee) external {
+    function adjustMintFee(uint _newFee)
+        external
+        onlyOwner
+    {
         mintFee = _newFee;
     }
 
-    function adjustRedemptionFee(uint _newFee) external {
+    function adjustRedemptionFee(uint _newFee)
+        external
+        onlyOwner
+    {
         redemptionFee = _newFee;
     }
 
-    function adjustMgmtFee(uint _newFee) external {
+    function adjustMgmtFee(uint _newFee)
+        external
+        onlyOwner
+    {
         mgmtFee = _newFee;
+    }
+
+    function setSafeManager(address _safeManager)
+        external
+        onlyOwner
+    {
+        safeManager = _safeManager;
     }
 }
