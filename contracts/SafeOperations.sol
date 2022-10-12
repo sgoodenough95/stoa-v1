@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "./interfaces/IController.sol";
 import "./interfaces/ISafeManager.sol";
 import "./interfaces/IActivated.sol";
+import "./interfaces/IUnactivated.sol";
 
 /**
  * @dev
@@ -33,6 +34,17 @@ contract SafeOperations is ReentrancyGuard {
     mapping(address => bool) public isActiveToken;
 
     mapping(address => address) public activeToInputToken;
+
+    /**
+     * @notice
+     *  One-time fee charged upon debt issuance, measured in basis points.
+     *  Leave as fixed for now.
+     */
+    uint public originationFee = 200 * 10 ** 18;    // tokens
+
+    uint public originationFeeCollected;
+
+    uint public minBorrow = 2_000 * 10 ** 18; // tokens
 
     struct CacheInit {
         address owner;
@@ -229,8 +241,8 @@ contract SafeOperations is ReentrancyGuard {
         (
             cacheVal.bal,  // credits
             cacheVal.mintFeeApplied,   // credits
-            cacheVal.redemptionFeeApplied, // tokens
-            cacheVal.debt, // tokens
+            cacheVal.redemptionFeeApplied, // tokens = credits
+            cacheVal.debt, // tokens = credits
             cacheVal.locked    // credits
         ) = safeManagerContract.getSafeVal(msg.sender, _index);
 
@@ -304,12 +316,100 @@ contract SafeOperations is ReentrancyGuard {
         }
     }
 
-    function initializeBorrow(uint _index, address _debtToken, uint _amount)
+    /**
+     * @notice
+     *  Function to initialize a borrow from a Safe. Once a debtToken has been initialized,
+     *  the owner cannot borrow another type of debtToken from the Safe (e.g., if borrowing
+     *  USDST, cannot then borrow GBPST from the same Safe).
+     * @param _index The Safe to initialize a borrow against.
+     * @param _debtToken The debtToken to be initialized.
+     * @param _amount The amount of debtTokens to borrow (limited by the Safe bal and CR).
+     * @param _CR How much collateral the user wishes to lock (in basis points).
+     */
+    function initializeBorrow(uint _index, address _debtToken, uint _amount, uint _CR)
         external
     {
-        
+        require(_amount >= minBorrow, "SafeOps: Borrow amount too low");
+
+        CacheInit memory cacheInit;
+
+        (
+            cacheInit.owner,
+            cacheInit.activeToken,
+            cacheInit.debtToken
+        ) = safeManagerContract.getSafeInit(msg.sender, _index);
+
+        CacheVal memory cacheVal;
+
+        (
+            cacheVal.bal,  // credits
+            cacheVal.mintFeeApplied,   // credits
+            cacheVal.redemptionFeeApplied, // tokens = credits
+            cacheVal.debt, // tokens = credits
+            cacheVal.locked    // credits
+        ) = safeManagerContract.getSafeVal(msg.sender, _index);
+
+        require(msg.sender == cacheInit.owner, "SafeOps: Owner mismatch");
+        require(
+            cacheInit.debtToken == address(0),
+            "SafeOps: debtToken already initialized - please pay off debt first"
+        );
+
+        IActivated activeToken = IActivated(cacheInit.activeToken);
+
+        uint maxBorrow = computeBorrowAllowance(
+            cacheInit.activeToken,
+            activeToken.convertToAssets(cacheVal.bal),
+            _debtToken
+        );
+        console.log("Max borrow: %s", maxBorrow);
+        require(_amount <= maxBorrow, "SafeOps: Insufficient funds for borrow amount");
+
+        // Always 200% CR
+        if (_debtToken == safeManagerContract.getUnactiveCounterpart(cacheInit.activeToken)) {
+            _CR = 20_000;
+        }
+        require(
+            _CR >= safeManagerContract.getActiveToDebtTokenMCR(cacheInit.activeToken, _debtToken),
+            "SafeOps: CR is too low"
+        );
+
+        // Compute number of activeToken tokens to lock.
+        uint toLock = (_amount * _CR) /  10_000;
+        console.log("Tokens to lock: %s", toLock);
+
+        // Convert to credits
+        toLock = activeToken.convertToCredits(toLock);
+        console.log("Credits to lock: %s", toLock);
+
+        uint originationFeeCredits = activeToken.convertToCredits(originationFee);
+
+        // Update Safe params
+        safeManagerContract.initializeBorrow({
+            _owner: cacheInit.owner,
+            _index: _index,
+            _toLock: toLock,
+            _debtToken: _debtToken,
+            _fee: originationFeeCredits
+        });
+
+        originationFeeCollected += originationFeeCredits;
+
+        safeManagerContract.adjustSafeDebt({
+            _owner: cacheInit.owner,
+            _index: _index,
+            _debtToken: _debtToken,
+            _amount: _amount,
+            _add: true
+        });
+
+        IUnactivated unactiveToken = IUnactivated(_debtToken);
+
+        unactiveToken.mint(msg.sender, _amount);
+        console.log("Minted %s unactiveTokens to %s", _amount, msg.sender);
     }
 
+    // May be the case that combine in one borrow or create internal fns.
     function borrow(uint _amount)
         external
         nonReentrant
@@ -347,6 +447,24 @@ contract SafeOperations is ReentrancyGuard {
         nonReentrant
     {
 
+    }
+
+    /**
+     * @param _activeToken The collateral to borrow against.
+     * @param _bal The amount of activeToken collateral (in tokens, not credits).
+     * @param _debtToken The debtToken to be minted.
+     * @return maxBorrow The max amount of debtTokens that can be borrowed.
+     */
+    function computeBorrowAllowance(address _activeToken, uint _bal, address _debtToken)
+        public
+        view
+        returns (uint maxBorrow)
+    {
+        // E.g., 20,000bp.
+        uint MCR = safeManagerContract.getActiveToDebtTokenMCR(_activeToken, _debtToken);
+
+        // Later change to divPrecisely (?)
+        maxBorrow = ((_bal - originationFee) * 10_000) / MCR;
     }
 
     /**

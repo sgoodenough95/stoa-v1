@@ -10,6 +10,14 @@ contract UnactivatedToken is ERC20 {
         string memory _symbol
     ) ERC20(_name, _symbol) {}
 
+    function mint(address _to, uint _amount) external {
+        _mint(_to, _amount);
+    }
+
+    function burn(address _from, uint _amount) external {
+        _mint(_from, _amount);
+    }
+
     function sendToPool() external {}
 
     function returnFromPool() external {}

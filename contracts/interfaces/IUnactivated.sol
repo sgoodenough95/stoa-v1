@@ -9,7 +9,7 @@ pragma solidity ^0.8.17;
  */
 interface IUnactivated {
 
-    function mint(address _account, uint _amount) external;
+    function mint(address _to, uint _amount) external;
 
-    function burn(address _account, uint _amount) external;
+    function burn(address _from, uint _amount) external;
 }

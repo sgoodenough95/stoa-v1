@@ -73,12 +73,40 @@ interface ISafeManager {
         uint _redemptionFeeApplied
     ) external;
 
+    function adjustSafeDebt(
+        address _owner,
+        uint _index,
+        address _debtToken,
+        uint _amount,
+        bool _add
+    ) external;
+
     function setSafeStatus(
         address _owner,
         uint _index,
         address _activeToken,
         uint _num
     ) external;
+
+    function initializeBorrow(
+        address _owner,
+        uint _index,
+        // address _activeToken,
+        uint _toLock,
+        address _debtToken,
+        // uint _amount,
+        uint _fee
+    ) external;
+
+    function getActiveToDebtTokenMCR(address _activeToken, address _debtToken)
+        external
+        view
+        returns (uint _MCR);
+
+    function getUnactiveCounterpart(address _activeToken)
+        external
+        view
+        returns (address unactiveToken);
 
     // function updateRebasingCreditsPerToken(address _inputToken) external view returns (uint);
 }

@@ -64,13 +64,6 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
 
     /**
      * @notice
-     *  One-time fee charged upon debt issuance, measured in basis points.
-     *  Later make fixed (?)
-     */
-    uint public originationFee;
-
-    /**
-     * @notice
      *  Minimum amount of debtToken that can be minted upon a borrow request.
      *  E.g., Min amount of 100 USDST can be minted upon borrow.
      */
@@ -105,6 +98,7 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
         // Increments only if depositing activeToken.
         uint mintFeeApplied;    // credits
         uint redemptionFeeApplied;  // tokens
+        uint originationFeesPaid;   // credits
         // Balance of the debtToken.
         uint debt;  // tokens
         // Amount of activeTokens locked as collateral.
@@ -206,6 +200,7 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
     {
         // Additional check to confirm that the activeToken being deposited is correct, may later be removed.
         require(safe[_owner][_index].activeToken == _activeToken, "SafeManager: activeToken mismatch");
+        require(safe[_owner][_index].status == Status(1), "SafeManager: Safe not active");
         
         if (_add == true) {
             safe[_owner][_index].bal += _amount;
@@ -240,8 +235,10 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
         onlySafeOps
     {
         require(safe[_owner][_index].debtToken == _debtToken, "SafeManager: debtToken mismatch");
+        require(safe[_owner][_index].status == Status(1), "SafeManager: Safe not active");
+
         if (_add == true) {
-            // Insert logic to handle max debt allowance / check if owner can be issued more debtTokens.
+            // Insert logic to handle max debt allowance / check if owner can be issued more debtTokens (?)
             safe[_owner][_index].debt += _amount;
         } else {
             safe[_owner][_index].debt -= _amount;
@@ -272,17 +269,28 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
         safe[_owner][_index].status = Status(_num);
     }
 
+    function setActiveToDebtTokenMCR(address _activeToken, address _debtToken, uint _MCR)
+        external
+    {
+        activeToDebtTokenMCR[_activeToken][_debtToken] = _MCR;
+    }
+
     function initializeBorrow(
         address _owner,
         uint _index,
-        address _activeToken,
+        // address _activeToken,
+        uint _toLock,   // credits
         address _debtToken,
-        uint _amount
+        // uint _amount,   // tokens
+        uint _fee   // credits
     )
         external
         onlySafeOps
     {
-
+        safe[_owner][_index].debtToken = _debtToken;
+        safe[_owner][_index].bal -= _toLock + _fee;
+        safe[_owner][_index].originationFeesPaid += _fee;
+        safe[_owner][_index].locked += _toLock;
     }
 
     /**
@@ -316,6 +324,22 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
 
         if (CR < MCR) return true;
         else return false;
+    }
+
+    function getActiveToDebtTokenMCR(address _activeToken, address _debtToken)
+        public
+        view
+        returns (uint _MCR)
+    {
+        return activeToDebtTokenMCR[_activeToken][_debtToken];
+    }
+
+    function getUnactiveCounterpart(address _activeToken)
+        public
+        view
+        returns (address unactiveToken)
+    {
+        return activeToUnactiveCounterpart[_activeToken];
     }
 
     // function liquidateSafe(address _owner, uint _index)
