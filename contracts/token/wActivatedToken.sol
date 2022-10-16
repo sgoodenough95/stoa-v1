@@ -67,12 +67,4 @@ contract wActivatedToken is ERC4626 {
     //     require(asset_ != address(asset()), "Cannot collect OUSD");
     //     IERC20(asset_).safeTransfer(governor(), amount_);
     // }
-
-    /**
-     * @dev
-     *  TBD whether these methods are included.
-     */
-    function sendToPool(uint _amount) external {}
-
-    function returnFromPool(uint _amount) external {}
 }

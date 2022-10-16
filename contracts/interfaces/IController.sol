@@ -16,7 +16,12 @@ interface IController {
 
     function deposit(address _depositor, uint _amount, bool _activated) external returns (uint mintAmount);
 
-    function withdrawTokensFromSafe(address _withdrawer, bool _activated, uint _amount, int _feeCoverage) external returns (uint amount);
+    function withdrawTokensFromSafe(
+        address _withdrawer,
+        bool _activated,
+        uint _amount
+        // int _feeCoverage
+    ) external returns (uint amount);
 
     function getActiveToken() external view returns (address _activeToken);
 

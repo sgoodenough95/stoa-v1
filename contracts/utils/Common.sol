@@ -5,6 +5,8 @@ contract Common {
 
     address public safeOperations;
 
+    mapping(address => address) public tokenToAP;
+
     modifier onlySafeOps()
     {
         require(msg.sender == safeOperations, "SafeManager: Only SafeOps can call");

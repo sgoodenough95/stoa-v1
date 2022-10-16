@@ -38,12 +38,6 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
     mapping(address => mapping(uint => Safe)) public safe;
 
     /**
-     * @dev activeToken => rebasingCreditsPerToken.
-     *  Motivation in having is to update Safe bals upon rebase (?)
-     */
-    mapping(address => uint) public rebasingCreditsPerActiveToken;
-
-    /**
      * @dev activeToken-debtToken => Max Collateralization Ratio.
      *  MCR measured in basis points.
      *  For active-unactive counterparts, will always be 200% (MCR = 20_000).
@@ -94,10 +88,10 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
         // Might not necessarily know this when opening a Safe.
         address debtToken;
         // activeToken creditBalance;
-        uint bal;   // credits
+        uint bal;   // apTokens / shares
         // Increments only if depositing activeToken.
-        uint mintFeeApplied;    // credits
-        uint redemptionFeeApplied;  // tokens
+        uint mintFeeApplied;
+        uint redemptionFeeApplied;
         uint originationFeesPaid;   // credits
         // Balance of the debtToken.
         uint debt;  // tokens
@@ -183,7 +177,7 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
      * @dev Safe balance setter, called only by SafeOperations
      * @param _owner The owner of the Safe.
      * @param _index The Safe's index.
-     * @param _amount The amount of activeTokens.
+     * @param _amount The amount of apTokens.
      * @param _add Boolean to indicate if _amount subtracts or adds to Safe balance.
      */
     function adjustSafeBal(
@@ -279,7 +273,7 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
         address _owner,
         uint _index,
         // address _activeToken,
-        uint _toLock,   // credits
+        uint _toLock,   // apTokens
         address _debtToken,
         // uint _amount,   // tokens
         uint _fee   // credits
@@ -362,20 +356,4 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
         IERC20 token = IERC20(_token);
         token.approve(_spender, type(uint).max);
     }
-
-    // /**
-    //  * @dev
-    //  *  Function for updating token balances upon rebase.
-    //  *  Only callable from the target Controller of the activeToken.
-    //  *  Motivation in including this is that, when a rebase occurs, the respective Controller
-    //  *  updates this value. May later remove however and simply read from the
-    //  *  activeToken's ERC20 contract.
-    //  */
-    // function updateRebasingCreditsPerToken(
-    //     address _activeToken
-    // ) external returns (uint) {
-    //     address _controller = safeOperationsContract.getController(_activeToken);
-    //     require(msg.sender == _controller, "Only target Controller can call");
-    //     return rebasingCreditsPerActiveToken[_activeToken] = IActivated(_activeToken).rebasingCreditsPerToken();
-    // }
 }
