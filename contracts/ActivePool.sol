@@ -46,6 +46,20 @@ contract ActivePool is ERC4626 {
         ActivatedToken(address(asset())).rebaseOptOut();
     }
 
+    /**
+     * @dev Added additional argument: depositor.
+     */
+    function deposit(uint256 assets, address receiver, address depositor)
+        public
+        returns (uint256 shares)
+    {
+        // Amended for OZ ERC4626. VaultWrapper has different implementation.
+        shares = previewDeposit(assets);
+        _deposit(depositor, receiver, assets, shares);
+
+        emit Deposit(depositor, receiver, assets, shares);
+    }
+
     // function name() public view override returns (string memory) {
     //     return "Wrapped OUSD";
     // }

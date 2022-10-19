@@ -138,7 +138,11 @@ contract SafeOperations is ReentrancyGuard, Common {
 
             // Need to approve SafeOperations spend for token first.
             // Deposit to activePool. Controller receives apTokens.
-            uint apTokens = IERC4626(tokenToAP[_token]).deposit(_amount, _targetController);
+            uint apTokens = IERC4626(tokenToAP[_token]).deposit(
+                _amount,
+                _targetController,
+                msg.sender
+            );
             console.log(
                 "Deposited %s activeTokens from %s to ActivePool",
                 _amount,

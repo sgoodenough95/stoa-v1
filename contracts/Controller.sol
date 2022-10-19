@@ -367,7 +367,7 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
         treasuryContract.adjustBackingReserve({
             _wildToken: unactiveToken,
             _backingToken: activeToken,
-            _amount: int(redemptionAmount) * -1
+            _amount: int(_amount) * -1
         });
         console.log(
             "Treasury reduced backing of unactiveTokens by %s activeTokens",
@@ -399,6 +399,12 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
 
         uint _redemptionFee = computeFee(_amount, false);
         uint redemptionAmount = _amount - _redemptionFee;
+        console.log(
+            "Amount: %s redemptionAmount: %s fee: %s",
+            _amount,
+            redemptionAmount,
+            _redemptionFee
+        );
 
         // Stoa retains redemptionFee amount of activeToken.
         activeTokenContract.burn(msg.sender, redemptionAmount);
@@ -407,7 +413,7 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
             redemptionAmount
         );
 
-        // Approve _inputTokenContract first before initiating transfer
+        // Approve activeToken first before initiating transfer
         activeTokenContract.transferFrom(msg.sender, treasury, _redemptionFee);
         console.log(
             "Transferred %s activeTokens from %s to Treasury",
@@ -436,12 +442,12 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
      *  May need to later add third option for unactivated.
      * @param _withdrawer The address to send inputTokens to.
      * @param _activated Indicates if withdrawing activeTokens (if not, then inputTokens).
-     * @param _amount The amount of apTokens.
+     * @param _shares The amount of apTokens.
      */
     function withdrawTokensFromSafe(
         address _withdrawer,
         bool _activated,
-        uint _amount
+        uint _shares
         // int _feeCoverage
     )
         external
@@ -457,10 +463,10 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
         // Withdraw activeTokens from respective ActivePool.
         // Controller holds apTokens for Safes.
         // Controller retains fee amount of apTokens. (Need to later send to Treasury).
-        uint _shares = vault.convertToShares(_amount);
 
         if (_activated == true) {
 
+            // _shares is apTokens, so no need to convertToShares beforehand.
             activeTokens = activePool.redeem(_shares, _withdrawer, address(this));
             console.log(
                 "Redeemed %s shares for %s activeTokens and sent to Safe owner",
@@ -532,9 +538,9 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
             activeTokenContract.changeSupply(activeTokenContractSupply + holderYield);
             console.log("Changed supply");
             if (stoaYield > 0) {
-                activeTokenContract.mint(address(this), stoaYield);
+                activeTokenContract.mint(treasury, stoaYield);
                 console.log(
-                    "Minted %s management fee to Controller",
+                    "Minted %s management fee to Treasury",
                     stoaYield
                 );
             }
@@ -613,5 +619,16 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
         onlyOwner
     {
         safeManager = _safeManager;
+    }
+
+    /**
+     * @dev Required to call when withdrawing activeTokens, for e.g.
+     * @notice _spender should only be Controller.
+     */
+    function approveToken(address _token, address _spender)
+        external
+    {
+        IERC20 token = IERC20(_token);
+        token.approve(_spender, type(uint).max);
     }
 }

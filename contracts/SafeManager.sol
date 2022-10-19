@@ -346,14 +346,4 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
     //     );
     //     // liquidation logic.
     // }
-
-    /**
-     * @dev Required to call when withdrawing activeTokens, for e.g.
-     */
-    function approveToken(address _token, address _spender)
-        external
-    {
-        IERC20 token = IERC20(_token);
-        token.approve(_spender, type(uint).max);
-    }
 }

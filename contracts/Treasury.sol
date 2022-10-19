@@ -20,7 +20,7 @@ import "./utils/RebaseOpt.sol";
 
 contract Treasury is Ownable, Common, RebaseOpt {
 
-    mapping(address => mapping(address => int)) backingReserve;
+    mapping(address => mapping(address => int)) public backingReserve;
 
     uint controllerBuffer;
 
@@ -45,5 +45,17 @@ contract Treasury is Ownable, Common, RebaseOpt {
         // onlyController
     {
         backingReserve[_wildToken][_backingToken] += _amount;
+    }
+
+
+    /**
+     * @dev Required to call when withdrawing activeTokens, for e.g.
+     * @notice _spender should only be Controller.
+     */
+    function approveToken(address _token, address _spender)
+        external
+    {
+        IERC20 token = IERC20(_token);
+        token.approve(_spender, type(uint).max);
     }
 }

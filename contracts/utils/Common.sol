@@ -13,6 +13,12 @@ contract Common {
         _;
     }
 
+    function setActivePool(address _token, address _activePool)
+        external
+    {
+        tokenToAP[_token] = _activePool;
+    }
+
     function setSafeOps(address _safeOperations)
         external
     {
