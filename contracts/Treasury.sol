@@ -21,6 +21,11 @@ import "./utils/RebaseOpt.sol";
 contract Treasury is Ownable, Common, RebaseOpt {
 
     mapping(address => mapping(address => int)) public backingReserve;
+    
+    /**
+     * @notice Amount of apTokens of a given ActivePool owned by the Treasury.
+     */
+    mapping(address => uint) apTokens;
 
     uint controllerBuffer;
 
@@ -40,13 +45,18 @@ contract Treasury is Ownable, Common, RebaseOpt {
 
     }
 
+    function adjustAPTokenBal(address _activePool, uint _amount)
+        external
+    {
+        apTokens[_activePool] += _amount;
+    }
+
     function adjustBackingReserve(address _wildToken, address _backingToken, int _amount)
         external
         // onlyController
     {
         backingReserve[_wildToken][_backingToken] += _amount;
     }
-
 
     /**
      * @dev Required to call when withdrawing activeTokens, for e.g.

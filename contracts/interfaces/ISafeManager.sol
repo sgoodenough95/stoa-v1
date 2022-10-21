@@ -3,65 +3,13 @@ pragma solidity ^0.8.17;
 
 interface ISafeManager {
 
-    // Later import
-    enum Status {
-        nonExistent,
-        active,
-        closedByOwner,
-        closedByLiquidation
-    }
+    function getSafeInit(address _owner, uint _index) external view returns (address, address, address);
 
-    // One Safe supports one type of activeToken and one type of debtToken.
-    struct Safe {
-        // // E.g., USDST
-        address activeToken;
-        // E.g., USDSTu
-        // Might not necessarily know this when opening a Safe.
-        address debtToken;
-        // activeToken creditBalance;
-        uint bal;
-        // Increments only if depositing activeToken.
-        uint mintFeeApplied;
-        uint redemptionFeeApplied;
-        // Balance of the debtToken.
-        uint debt;
-        // Amount of activeTokens locked as collateral.
-        uint locked;
-        uint index;
-        Status status;
-    }
+    function getSafeVal(address _owner, uint _index) external view returns (uint, uint, uint, uint);
 
-    function getSafeInit(
-        address _owner,
-        uint _index
-    )
-        external
-        view
-        returns (address, address, address);
+    function getSafeStatus(address _owner, uint _index) external view returns (uint);
 
-        function getSafeVal(
-        address _owner,
-        uint _index
-    )
-        external
-        view
-        returns (uint, uint, uint, uint, uint);
-
-    function getSafeStatus(
-        address _owner,
-        uint _index
-    )  
-        external
-        view
-        returns (uint);
-
-    function initializeSafe(
-        address _owner,
-        address _activeToken,
-        uint _amount,
-        uint _mintFeeApplied,
-        uint _redemptionFeeApplied
-    ) external;
+    function initializeSafe(address _owner, address _activeToken, uint _amount, uint _mintFeeApplied, uint _redemptionFeeApplied) external;
 
     function adjustSafeBal(
         address _owner,
@@ -92,21 +40,15 @@ interface ISafeManager {
         address _owner,
         uint _index,
         // address _activeToken,
-        uint _toLock,
-        address _debtToken,
+        // uint _toLock,
+        address _debtToken
         // uint _amount,
-        uint _fee
+        // uint _fee
     ) external;
 
-    function getActiveToDebtTokenMCR(address _activeToken, address _debtToken)
-        external
-        view
-        returns (uint _MCR);
+    function getActiveToDebtTokenMCR(address _activeToken, address _debtToken) external view returns (uint _MCR);
 
-    function getUnactiveCounterpart(address _activeToken)
-        external
-        view
-        returns (address unactiveToken);
+    function getUnactiveCounterpart(address _activeToken) external view returns (address unactiveToken);
 
-    // function updateRebasingCreditsPerToken(address _inputToken) external view returns (uint);
+    function getActivePool(address _token) external view returns (address activePool);
 }

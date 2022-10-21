@@ -10,7 +10,7 @@ import "./interfaces/IVaultWrapper.sol";
 import "./interfaces/IActivated.sol";
 import "./interfaces/IUnactivated.sol";
 import "./interfaces/ITreasury.sol";
-// import "./interfaces/ISafeManager.sol";
+import "./interfaces/ISafeManager.sol";
 import { RebaseOpt } from "./utils/RebaseOpt.sol";
 import { Common } from "./utils/Common.sol";
 
@@ -78,7 +78,7 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
 
     IUnactivated public unactiveTokenContract;
 
-    // ISafeManager safeManagerContract = ISafeManager(safeManager);
+    ISafeManager safeManagerContract = ISafeManager(safeManager);
 
     /**
      * @dev Boolean to pause receiving deposits.
@@ -198,11 +198,15 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
                     "Minted %s activeTokens to Controller", _amount
                 );
 
+                IERC4626 activePool = IERC4626(
+                    safeManagerContract.getActivePool(activeToken)
+                );
+
                 // Safe collateral is stored in its respective ActivePool contract.
                 // Controller holds the apTokens for Safes.
                 // Need to return shares for SafeOps to store apToken bal.
                 // Uses SafeERC20 which might not work.
-                shares = IERC4626(tokenToAP[activeToken]).deposit(
+                shares = activePool.deposit(
                     _amount,
                     address(this)
                 );
@@ -458,7 +462,9 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
 
         // redemptionAmount = _amount - fee;
 
-        IERC4626 activePool = IERC4626(tokenToAP[activeToken]);
+        IERC4626 activePool = IERC4626(
+            safeManagerContract.getActivePool(activeToken)
+        );
 
         // Withdraw activeTokens from respective ActivePool.
         // Controller holds apTokens for Safes.

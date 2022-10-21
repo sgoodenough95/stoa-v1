@@ -12,7 +12,7 @@ import "../interfaces/IVaultWrapper.sol";
 // TODO: integrate solmate ERC20 instead OZ.
 // Needs to extract VaultAPI interface out of BaseStrategy to avoid collision
 contract VaultWrapper is ERC20, IVaultWrapper, IERC4626 {
-    VaultAPI public immutable yVault;
+    VaultAPI public immutable yVault;   // CompoundETHAPI   CompoundDAIAPI
     address public immutable token;
     uint256 public immutable _decimals;
 

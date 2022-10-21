@@ -10,6 +10,9 @@ import "./interfaces/IController.sol";
 import "./interfaces/ISafeManager.sol";
 import "./interfaces/IActivated.sol";
 import "./interfaces/IUnactivated.sol";
+import "./interfaces/IPriceFeed.sol";
+import "./interfaces/IUnactivated.sol";
+import "./interfaces/ITreasury.sol";
 
 /**
  * @dev
@@ -25,7 +28,15 @@ contract SafeOperations is ReentrancyGuard, Common {
 
     address public safeManager;
 
+    address public treasury;
+
+    address public priceFeed;
+
     ISafeManager safeManagerContract;
+
+    ITreasury treasuryContract;
+
+    IPriceFeed priceFeedContract;
 
     mapping(address => address) public tokenToController;
 
@@ -59,14 +70,15 @@ contract SafeOperations is ReentrancyGuard, Common {
         uint mintFeeApplied;
         uint redemptionFeeApplied;
         uint debt;
-        uint locked;
     }
 
     uint cacheStatus;
 
-    constructor(address _safeManager) {
+    constructor(address _safeManager, address _priceFeed) {
         safeManager = _safeManager;
+        priceFeed = _priceFeed;
         safeManagerContract = ISafeManager(safeManager);
+        priceFeedContract = IPriceFeed(priceFeed);
     }
 
     /**
@@ -136,9 +148,13 @@ contract SafeOperations is ReentrancyGuard, Common {
             require(validActiveToken(_token));
             console.log("Opening a Safe with activeToken: %s", _token);
 
+            IERC4626 activePool = IERC4626(
+                safeManagerContract.getActivePool(_token)
+            );
+
             // Need to approve SafeOperations spend for token first.
             // Deposit to activePool. Controller receives apTokens.
-            uint apTokens = IERC4626(tokenToAP[_token]).deposit(
+            uint apTokens = activePool.deposit(
                 _amount,
                 _targetController,
                 msg.sender
@@ -162,6 +178,7 @@ contract SafeOperations is ReentrancyGuard, Common {
             });
             console.log("Initialized Safe instance");
         }
+        // Later add option for unactiveTokens.
     }
 
     /**
@@ -210,9 +227,13 @@ contract SafeOperations is ReentrancyGuard, Common {
             require(validActiveToken(_token));
             console.log("Depositing to Safe with activeToken: %s", _token);
 
+            IERC4626 activePool = IERC4626(
+                safeManagerContract.getActivePool(_token)
+            );
+
             // Need to approve SafeOperations spend for token first.
             // Deposit to activePool. Controller receives apTokens.
-            uint apTokens = IERC4626(tokenToAP[_token]).deposit(_amount, _targetController);
+            uint apTokens = activePool.deposit(_amount, _targetController);
             console.log(
                 "Deposited %s activeTokens from %s to ActivePool",
                 _amount,
@@ -262,38 +283,11 @@ contract SafeOperations is ReentrancyGuard, Common {
             cacheVal.bal,  // apTokens
             cacheVal.mintFeeApplied,
             cacheVal.redemptionFeeApplied,
-            cacheVal.debt,
-            cacheVal.locked    // apTokens
+            cacheVal.debt
         ) = safeManagerContract.getSafeVal(msg.sender, _index);
 
         require(msg.sender == cacheInit.owner, "SafeOps: Owner mismatch");
-
-        // IActivated activeToken = IActivated(cacheInit.activeToken);
-
-        // Safe bal is in creditBalances, so need to estimate equivalent token balance.
-        // tokenAmount = activeToken.convertToAssets(_amount);
-        // uint tokenBal = activeToken.convertToAssets(cacheVal.bal);
-        // console.log(
-        //     "Withdrawing %s tokens from Safe with %s token balance",
-        //     tokenAmount,
-        //     tokenBal
-        // );
-        // require(
-        //     tokenAmount <= tokenBal,
-        //     "SafeOps: Insufficient Safe balance"
-        // );
-
         require(_amount <= cacheVal.bal, "SafeOps: Insufficient balance");
-
-        // console.log("%s credits = %s activeTokens", _amount, tokenAmount);
-
-        // --- Add fee logic later ---
-        // (feeCoverage, mintFeeChange, redemptionFeeChange) = computeFee(
-        //     _activated,
-        //     activeToken.convertToAssets(cacheVal.mintFeeApplied),    // tokens
-        //     activeToken.convertToAssets(cacheVal.redemptionFeeApplied), // tokens
-        //     tokenAmount // tokens
-        // );
 
         // Locate the activeToken's Controller.
         address _targetController = tokenToController[cacheInit.activeToken];
@@ -307,14 +301,6 @@ contract SafeOperations is ReentrancyGuard, Common {
             _amount
             // feeCoverage
         );
-
-        // mintFeeChange = activeToken.convertToCredits(mintFeeChange);
-        // redemptionFeeChange = activeToken.convertToCredits(redemptionFeeChange);
-        // console.log("Mint fee change: %s", mintFeeChange);
-        // console.log("Redemption fee change: %s", redemptionFeeChange);
-
-        // mintFeeChange = _amount > cacheVal.mintFeeApplied ? cacheVal.mintFeeApplied : _amount;
-        // redemptionFeeChange = _amount > cacheVal.redemptionFeeApplied ? cacheVal.redemptionFeeApplied : _amount;
 
         // Update Safe params.
         safeManagerContract.adjustSafeBal({
@@ -342,13 +328,14 @@ contract SafeOperations is ReentrancyGuard, Common {
      * @param _index The Safe to initialize a borrow against.
      * @param _debtToken The debtToken to be initialized.
      * @param _amount The amount of debtTokens to borrow (limited by the Safe bal and CR).
-     * @param _CR How much collateral the user wishes to lock (in basis points).
+     * @param _initialize Indicated whether a borrow is being initialized.
      */
-    function initializeBorrow(uint _index, address _debtToken, uint _amount, uint _CR)
+    function borrow(uint _index, address _debtToken, uint _amount, bool _initialize)
         external
     {
         require(_amount >= minBorrow, "SafeOps: Borrow amount too low");
 
+        // First, get the Safe params.
         CacheInit memory cacheInit;
 
         (
@@ -360,112 +347,72 @@ contract SafeOperations is ReentrancyGuard, Common {
         CacheVal memory cacheVal;
 
         (
-            cacheVal.bal,  // credits
-            cacheVal.mintFeeApplied,   // credits
-            cacheVal.redemptionFeeApplied, // tokens = credits
-            cacheVal.debt, // tokens = credits
-            cacheVal.locked    // credits
+            cacheVal.bal,   // apTokens
+            cacheVal.mintFeeApplied,
+            cacheVal.redemptionFeeApplied,
+            cacheVal.debt, // unactiveTokens
+            cacheVal.locked // apTokens
         ) = safeManagerContract.getSafeVal(msg.sender, _index);
 
         require(msg.sender == cacheInit.owner, "SafeOps: Owner mismatch");
-        require(
-            cacheInit.debtToken == address(0),
-            "SafeOps: debtToken already initialized - please pay off debt first"
-        );
 
-        IActivated activeToken = IActivated(cacheInit.activeToken);
+        if (_initialize == true) {
+            require(
+                cacheInit.debtToken == address(0),
+                "SafeOps: debtToken already initialized - please pay off debt first"
+            );
+        } else {
+            require(
+                cacheInit.debtToken != address(0),
+                "SafeOps: debtToken not initialized"
+            );
+        }
 
-        uint maxBorrow = computeBorrowAllowance(
+        // Find the Safe's maxBorrow.
+        (address activePool, uint maxBorrow, uint MCR, uint oFeeShares) = computeBorrowAllowance(
             cacheInit.activeToken,
-            activeToken.convertToAssets(cacheVal.bal),
+            cacheVal.bal,
             _debtToken
         );
         console.log("Max borrow: %s", maxBorrow);
         require(_amount <= maxBorrow, "SafeOps: Insufficient funds for borrow amount");
 
-        // Always 200% CR
-        if (_debtToken == safeManagerContract.getUnactiveCounterpart(cacheInit.activeToken)) {
-            _CR = 20_000;
-        }
+        uint CR = computeCR(cacheInit.activeToken, _debtToken, _amount, cacheVal.bal);
+        console.log("CR: %s", CR);
         require(
-            _CR >= safeManagerContract.getActiveToDebtTokenMCR(cacheInit.activeToken, _debtToken),
-            "SafeOps: CR is too low"
+            CR > MCR,
+            "SafeOps: Insuffiicient collateral posted to meet MCR"
         );
 
-        // Compute number of activeToken tokens to lock.
-        uint toLock = (_amount * _CR) /  10_000;
-        console.log("Tokens to lock: %s", toLock);
+        // Find originationFee worth of apTokens + make available to Treausry.
+        // Treasury holds apTokens / has a dedicated Safe (?)
+        treasuryContract.adjustAPTokenBal(activePool, oFeeShares);
 
-        // Convert to credits
-        toLock = activeToken.convertToCredits(toLock);
-        console.log("Credits to lock: %s", toLock);
+        // Update Safe params - ensure correct.
+        if (_initialize == true) {
+            safeManagerContract.initializeBorrow({
+                _owner: cacheInit.owner,
+                _index: _index,
+                _debtToken: _debtToken
+            });
+            console.log("Initialized borrow");
+        }
 
-        uint originationFeeCredits = activeToken.convertToCredits(originationFee);
-
-        // Update Safe params
-        safeManagerContract.initializeBorrow({
-            _owner: cacheInit.owner,
-            _index: _index,
-            _toLock: toLock,
-            _debtToken: _debtToken,
-            _fee: originationFeeCredits
-        });
-
-        originationFeeCollected += originationFeeCredits;
+        // Later add mapping (?)
+        originationFeeCollected += originationFee;
 
         safeManagerContract.adjustSafeDebt({
             _owner: cacheInit.owner,
             _index: _index,
             _debtToken: _debtToken,
-            _amount: _amount,
-            _add: true
+            _amount: _amount
         });
+        console.log("Adjusted Safe debt");
 
         IUnactivated unactiveToken = IUnactivated(_debtToken);
 
         unactiveToken.mint(msg.sender, _amount);
         console.log("Minted %s unactiveTokens to %s", _amount, msg.sender);
-    }
-
-    // May be the case that combine in one borrow or create internal fns.
-    function borrow(uint _index, uint _amount, uint _newCR)
-        external
-        nonReentrant
-    {
-        require(_amount >= minBorrow, "SafeOps: Borrow amount too low");
-
-        CacheInit memory cacheInit;
-
-        (
-            cacheInit.owner,
-            cacheInit.activeToken,
-            cacheInit.debtToken
-        ) = safeManagerContract.getSafeInit(msg.sender, _index);
-
-        CacheVal memory cacheVal;
-
-        (
-            cacheVal.bal,  // credits
-            cacheVal.mintFeeApplied,   // credits
-            cacheVal.redemptionFeeApplied, // tokens = credits
-            cacheVal.debt, // tokens = credits
-            cacheVal.locked    // credits
-        ) = safeManagerContract.getSafeVal(msg.sender, _index);
-
-        require(msg.sender == cacheInit.owner, "SafeOps: Owner mismatch");
-        require(
-            cacheInit.debtToken != address(0),
-            "SafeOps: debtToken not initialized"
-        );
-
-        IActivated activeToken = IActivated(cacheInit.activeToken);
-
-        uint maxBorrow = computeBorrowAllowance(
-            cacheInit.activeToken,
-            activeToken.convertToAssets(cacheVal.bal),
-            cacheInit.debtToken
-        );
-
     }
 
     function repay(uint _amount)
@@ -504,18 +451,47 @@ contract SafeOperations is ReentrancyGuard, Common {
      * @param _activeToken The collateral to borrow against.
      * @param _bal The amount of activeToken collateral (in tokens, not credits).
      * @param _debtToken The debtToken to be minted.
-     * @return maxBorrow The max amount of debtTokens that can be borrowed.
      */
     function computeBorrowAllowance(address _activeToken, uint _bal, address _debtToken)
         public
         view
-        returns (uint maxBorrow)
+        returns (address _activePool, uint maxBorrow, uint MCR, uint oFeeShares)
     {
+        // First, find the ActivePool contract of the activeToken.
+        _activePool = safeManagerContract.getActivePool(_activeToken);
+
+        IERC4626 activePool = IERC4626(_activePool);
+
+        // Second, get the pricePerShare for the _bal
+        uint assets = activePool.previewRedeem(_bal);
+
+        // First need to find originationFee worth of apTokens.
+        uint activeTokenPrice = priceFeedContract.getPrice(_activeToken);
+        console.log("activeToken price: %s", activeTokenPrice);
+        uint oFeeTokens = activeTokenPrice / originationFee;
+        console.log("originationFee worth of activeTokens: %s", oFeeTokens);
+        oFeeShares = activePool.previewMint(oFeeTokens);
+        console.log("originationFee worth of apTokens: %s", oFeeShares);
+
         // E.g., 20,000bp.
-        uint MCR = safeManagerContract.getActiveToDebtTokenMCR(_activeToken, _debtToken);
+        MCR = safeManagerContract.getActiveToDebtTokenMCR(_activeToken, _debtToken);
 
         // Later change to divPrecisely (?)
-        maxBorrow = ((_bal - originationFee) * 10_000) / MCR;
+        maxBorrow = ((assets - originationFee) * 10_000) / MCR;
+    }
+
+    function computeCR(address _activeToken, address _debtToken, uint _amount, uint _debtAmount)
+        public
+        view
+        returns (uint CR)
+    {
+        if (safeManagerContract.getUnactiveCounterpart(_activeToken) == _debtToken) {
+            CR = 20_000;
+        } else {
+            uint activeTokenPrice = priceFeedContract.getPrice(_activeToken);
+            uint debtTokenPrice = priceFeedContract.getPrice(_debtToken);
+            CR = ((_amount * activeTokenPrice) - originationFee) / (_debtAmount * debtTokenPrice) * 10_000;
+        }
     }
 
     /**
@@ -576,5 +552,11 @@ contract SafeOperations is ReentrancyGuard, Common {
         external
     {
         tokenToController[_token] = _controller;
+    }
+
+    function setTreasury(address _treasury)
+        external
+    {
+        treasury = _treasury;
     }
 }

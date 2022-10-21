@@ -38,6 +38,11 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
     mapping(address => mapping(uint => Safe)) public safe;
 
     /**
+     * @dev Referred to by other contracts.
+     */
+    mapping(address => address) public tokenToAP;
+
+    /**
      * @dev activeToken-debtToken => Max Collateralization Ratio.
      *  MCR measured in basis points.
      *  For active-unactive counterparts, will always be 200% (MCR = 20_000).
@@ -95,8 +100,6 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
         uint originationFeesPaid;   // credits
         // Balance of the debtToken.
         uint debt;  // tokens
-        // Amount of activeTokens locked as collateral.
-        uint locked;    // credits
         uint index;
         Status status;
     }
@@ -124,14 +127,13 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
     )
         external
         view
-        returns (uint, uint, uint, uint, uint)
+        returns (uint, uint, uint, uint)
     {
         return (
             safe[_owner][_index].bal,
             safe[_owner][_index].mintFeeApplied,
             safe[_owner][_index].redemptionFeeApplied,
-            safe[_owner][_index].debt,
-            safe[_owner][_index].locked
+            safe[_owner][_index].debt
         );
     }
 
@@ -222,8 +224,8 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
         address _owner,
         uint _index,
         address _debtToken,
-        uint _amount,
-        bool _add
+        int _amount,
+        uint _fee  // apTokens
     )
         external
         onlySafeOps
@@ -231,12 +233,17 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
         require(safe[_owner][_index].debtToken == _debtToken, "SafeManager: debtToken mismatch");
         require(safe[_owner][_index].status == Status(1), "SafeManager: Safe not active");
 
-        if (_add == true) {
-            // Insert logic to handle max debt allowance / check if owner can be issued more debtTokens (?)
-            safe[_owner][_index].debt += _amount;
-        } else {
-            safe[_owner][_index].debt -= _amount;
+        if (_amount < 0) {
+
         }
+
+        // if (_add == true) {
+        //     // Insert logic to handle max debt allowance / check if owner can be issued more debtTokens (?)
+        //     // Above requirement handled by SafeOps
+        //     safe[_owner][_index].debt += _amount;
+        // } else {
+        //     safe[_owner][_index].debt -= _amount;
+        // }
     }
 
     /**
@@ -273,18 +280,18 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
         address _owner,
         uint _index,
         // address _activeToken,
-        uint _toLock,   // apTokens
-        address _debtToken,
+        // uint _toLock,   // apTokens
+        address _debtToken
         // uint _amount,   // tokens
-        uint _fee   // credits
+        // uint _fee   // credits
     )
         external
         onlySafeOps
     {
         safe[_owner][_index].debtToken = _debtToken;
-        safe[_owner][_index].bal -= _toLock + _fee;
-        safe[_owner][_index].originationFeesPaid += _fee;
-        safe[_owner][_index].locked += _toLock;
+        // safe[_owner][_index].bal -= _toLock + _fee;
+        // safe[_owner][_index].originationFeesPaid += _fee;
+        // safe[_owner][_index].locked += _toLock;
     }
 
     /**
@@ -334,6 +341,20 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
         returns (address unactiveToken)
     {
         return activeToUnactiveCounterpart[_activeToken];
+    }
+
+    function setActivePool(address _token, address _activePool)
+        external
+    {
+        tokenToAP[_token] = _activePool;
+    }
+
+    function getActivePool(address _token)
+        external
+        view
+        returns (address activePool)
+    {
+        activePool = tokenToAP[_token];
     }
 
     // function liquidateSafe(address _owner, uint _index)
