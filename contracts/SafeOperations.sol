@@ -413,16 +413,51 @@ contract SafeOperations is ReentrancyGuard, Common {
         console.log("Adjusted Safe debt");
 
         IUnactivated unactiveToken = IUnactivated(_debtToken);
-
         unactiveToken.mint(msg.sender, _amount);
         console.log("Minted %s unactiveTokens to %s", _amount, msg.sender);
     }
 
-    function repay(uint _amount)
+    /**
+     * @param _index The index of the Safe to repay.
+     * @param _amount The amount of debtTokens to burn/repay.
+     */
+    function repay(uint _index, uint _amount)
         external
         nonReentrant
     {
+        // First, get the Safe params.
+        CacheInit memory cacheInit;
 
+        (
+            cacheInit.owner,
+            cacheInit.activeToken,
+            cacheInit.debtToken
+        ) = safeManagerContract.getSafeInit(msg.sender, _index);
+
+        CacheVal memory cacheVal;
+
+        (
+            cacheVal.bal,   // apTokens
+            cacheVal.mintFeeApplied,
+            cacheVal.redemptionFeeApplied,
+            cacheVal.debt // unactiveTokens
+        ) = safeManagerContract.getSafeVal(msg.sender, _index);
+
+        require(msg.sender == cacheInit.owner, "SafeOps: Owner mismatch");
+        require(_amount <= cacheVal.debt, "SafeOps: invalid repayment amount");
+
+        IUnactivated unactiveToken = IUnactivated(cacheInit.debtToken);
+        unactiveToken.burn(msg.sender, _amount);
+        console.log("Burned %s tokens from %s", _amount, msg.sender);
+
+        safeManagerContract.adjustSafeDebt({
+            _owner: cacheInit.owner,
+            _index: _index,
+            _debtToken: cacheInit.debtToken,
+            _amount: int(_amount) * -1,
+            _fee: 0
+        });
+        console.log("Adjusted Safe debt");
     }
 
     function transferActiveTokens(
