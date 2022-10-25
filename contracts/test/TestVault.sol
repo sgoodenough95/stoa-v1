@@ -10,28 +10,26 @@ import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-import { TestDAI } from "./TestDAI.sol";
-import { ITestDAI } from "./ITestDAI.sol";
+import { TestERC20 } from "./TestERC20.sol";
+import { ITestERC20 } from "./ITestERC20.sol";
 
 contract TestVault is ERC4626 {
     using SafeERC20 for IERC20;
 
-    address testDAI;
-
-    uint tokenBaseUnits = 10 ** 18;
+    address inputToken;
 
     constructor(
         ERC20 underlying_,
-        address testDAI_,
+        address inputToken_,
         string memory name_,
         string memory symbol_
     ) ERC20(name_, symbol_) ERC4626(underlying_) {
-        testDAI = testDAI_;
+        inputToken = inputToken_;
     }
 
-    function simulateYield() external {
+    function simulateYield(uint _yield) external {
 
-        ITestDAI(testDAI).mint(address(this), 1_000 * tokenBaseUnits);
+        ITestERC20(inputToken).mint(address(this), _yield);
     }
 
     /**

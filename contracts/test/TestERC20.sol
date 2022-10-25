@@ -3,12 +3,14 @@ pragma solidity ^0.8.17;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
-contract TestDAI is ERC20 {
-    
-    uint tokenBaseUnits = 10 ** 18;
+contract TestERC20 is ERC20 {
 
-    constructor() ERC20("Test DAI", "tDAI") {
-        _mint(msg.sender, 10_000 * tokenBaseUnits);
+    constructor(
+        string memory _name,
+        string memory _symbol,
+        uint _genesisMint
+    ) ERC20(_name, _symbol) {
+        _mint(msg.sender, _genesisMint);
     }
 
     function mint(address _to, uint _amount) external {

@@ -7,7 +7,7 @@ pragma solidity ^0.8.17;
  * @notice
  *  Interface that provides functions for interacting with activated Stoa tokens.
  */
-interface ITestDAI {
+interface ITestERC20 {
     
     function mint(address _to, uint _amount) external;
 }

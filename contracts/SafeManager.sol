@@ -5,8 +5,10 @@ import "hardhat/console.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "./interfaces/IController.sol";
+import "./interfaces/IERC4626.sol";
 import "./interfaces/IActivated.sol";
 import "./interfaces/ISafeOperations.sol";
+import "./interfaces/IPriceFeed.sol";
 import { RebaseOpt } from "./utils/RebaseOpt.sol";
 import { Common } from "./utils/Common.sol";
 
@@ -23,6 +25,10 @@ import { Common } from "./utils/Common.sol";
  *  are purely debt tokens (similar to Dai's Vaults).
  */
 contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
+
+    address public priceFeed;
+
+    IPriceFeed priceFeedContract;
 
     /**
      * @dev
@@ -103,6 +109,10 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
         uint debt;  // tokens
         uint index;
         Status status;
+    }
+
+    constructor(address _priceFeed) {
+        priceFeed = _priceFeed;
     }
 
     /**
@@ -268,12 +278,6 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
         safe[_owner][_index].status = Status(_num);
     }
 
-    function setActiveToDebtTokenMCR(address _activeToken, address _debtToken, uint _MCR)
-        external
-    {
-        activeToDebtTokenMCR[_activeToken][_debtToken] = _MCR;
-    }
-
     function initializeBorrow(
         address _owner,
         uint _index,
@@ -318,11 +322,26 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
             "SafeManager: Invalid pair"
         );
 
+        IERC4626 activePool = IERC4626(this.getActivePool(activeToken));
+        uint assets = activePool.previewRedeem(safe[_owner][_index].bal);
+        console.log("Safe assets: %s", assets);
+
+        uint activeTokenPrice = priceFeedContract.getPrice(activeToken);
+        console.log("activeToken price: %s", activeTokenPrice);
+
         uint MCR = activeToDebtTokenMCR[activeToken][debtToken];
-        uint CR = (safe[_owner][_index].bal / safe[_owner][_index].debt) * 10_000;
+        console.log("Minimum Collateralisation Ratio: %s", MCR);
+        uint CR = (assets / safe[_owner][_index].debt) * 10_000;
+        console.log("Safe Collateralisation Ratio: %s", CR);
 
         if (CR < MCR) return true;
         else return false;
+    }
+
+    function setActiveToDebtTokenMCR(address _activeToken, address _debtToken, uint _MCR)
+        external
+    {
+        activeToDebtTokenMCR[_activeToken][_debtToken] = _MCR;
     }
 
     function getActiveToDebtTokenMCR(address _activeToken, address _debtToken)
@@ -345,6 +364,12 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
         external
     {
         tokenToAP[_token] = _activePool;
+    }
+
+    function setPriceFeed(address _priceFeed)
+        external
+    {
+        priceFeed = _priceFeed;
     }
 
     function getActivePool(address _token)

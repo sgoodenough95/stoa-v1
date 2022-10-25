@@ -11,56 +11,92 @@ describe("Safe", function () {
     async function deployContracts() {
 
         const [owner] = await ethers.getSigners();
-        // const MAX_INT = (2^256 - 1).toString();
+        const MAX_UINT = (2^256 - 1).toString();
 
         const ActivatedToken = await ethers.getContractFactory("ActivatedToken");
         const UnactivatedToken = await ethers.getContractFactory("UnactivatedToken");
-        const TestDAI = await ethers.getContractFactory("TestDAI");
+        const TestERC20 = await ethers.getContractFactory("TestERC20");
         const TestVault = await ethers.getContractFactory("TestVault");
         const Treasury = await ethers.getContractFactory("Treasury");
         const ActivePool = await ethers.getContractFactory("ActivePool");
         const Controller = await ethers.getContractFactory("Controller");
+        const PriceFeed = await ethers.getContractFactory("PriceFeed");
         const SafeManager = await ethers.getContractFactory("SafeManager");
         const SafeOps = await ethers.getContractFactory("SafeOperations");
-        const activatedToken = await ActivatedToken.deploy("Stoa Activated Dollar", "USDSTa");
-        const unactivatedToken = await UnactivatedToken.deploy("Stoa Dollar", "USDST");
-        const testDAI = await TestDAI.deploy();
-        const testVault = await TestVault.deploy(testDAI.address, testDAI.address, "Test yvDAI", "tyvDAI");
+        const USDSTa = await ActivatedToken.deploy("Stoa Activated Dollar", "USDSTa");
+        const ETHSTa = await ActivatedToken.deploy("Stoa Activated Ethereum", "ETHSTa");
+        const USDST = await UnactivatedToken.deploy("Stoa Dollar", "USDST");
+        const ETHST = await UnactivatedToken.deploy("Stoa Ethereum", "ETHST");
+        const testDAI = await TestERC20.deploy("Test DAI", "tDAI", "10000000000000000000000");    // 10,000 DAI
+        const testETH = await TestERC20.deploy("Test ETH", "tETH", "100000000000000000000");    // 10 ETH
+        const testDAIVault = await TestVault.deploy(testDAI.address, testDAI.address, "Test yvDAI", "tyvDAI");
+        const testETHVault = await TestVault.deploy(testETH.address, testETH.address, "Test yvETH", "tyvETH");
         const treasury = await Treasury.deploy();
-        const activePool = await ActivePool.deploy(activatedToken.address, "Active Pool USDSTa", "apUSDSTa");
-        const controller = await Controller.deploy(
-            testVault.address,
+        const USDSTaPool = await ActivePool.deploy(USDSTa.address, "Active Pool USDSTa", "apUSDSTa");
+        const ETHSTaPool = await ActivePool.deploy(USDSTa.address, "Active Pool ETHSTa", "apETHSTa");
+        const USDController = await Controller.deploy(
+            testDAIVault.address,
             treasury.address,
             testDAI.address,
-            activatedToken.address,
-            unactivatedToken.address
+            USDSTa.address,
+            USDST.address
         );
-        const safeManager = await SafeManager.deploy();
-        const safeOps = await SafeOps.deploy(safeManager.address);
+        const ETHController = await Controller.deploy(
+            testETHVault.address,
+            treasury.address,
+            testETH.address,
+            ETHSTa.address,
+            ETHST.address
+        );
+        const priceFeed = await PriceFeed.deploy();
+        const safeManager = await SafeManager.deploy(priceFeed.address);
+        const safeOps = await SafeOps.deploy(safeManager.address, priceFeed.address);
 
-        await controller.rebaseOptIn(activatedToken.address);
-        await treasury.rebaseOptIn(activatedToken.address);
-        await activePool.rebaseOptIn();
+        await USDController.rebaseOptIn(USDSTa.address);
+        await ETHController.rebaseOptIn(ETHSTa.address);
+        await treasury.rebaseOptIn(USDSTa.address);
+        await treasury.rebaseOptIn(ETHSTa.address);
+        await USDSTaPool.rebaseOptIn();
+        await ETHSTaPool.rebaseOptIn();
 
-        await safeOps.setController(testDAI.address, controller.address);
-        await safeOps.setController(activatedToken.address, controller.address);
+        await safeOps.setController(testDAI.address, USDController.address);
+        await safeOps.setController(USDSTa.address, USDController.address);
+        await safeOps.setController(testETH.address, ETHController.address);
+        await safeOps.setController(ETHSTa.address, ETHController.address);
         await safeManager.setSafeOps(safeOps.address);
-        await controller.setSafeOps(safeOps.address);
-        await controller.setSafeManager(safeManager.address);
-        await controller.setActivePool(activatedToken.address, activePool.address);
-        await safeOps.setActivePool(activatedToken.address, activePool.address);
+        await USDController.setSafeOps(safeOps.address);
+        await ETHController.setSafeOps(safeOps.address);
+        await USDController.setSafeManager(safeManager.address);
+        await ETHController.setSafeManager(safeManager.address);
+        await safeManager.setActivePool(USDSTa.address, USDSTaPool.address);
+        await safeManager.setActivePool(ETHSTa.address, ETHSTaPool.address);
+        await priceFeed.setPrice(USDSTa.address, "1000000000000000000");    // $1
+        await priceFeed.setPrice(USDST.address, "1000000000000000000"); // $1
+        await priceFeed.setPrice(ETHSTa.address, "1000000000000000000000");    // $1,000
+        await priceFeed.setPrice(ETHST.address, "1000000000000000000000"); // $1,000
 
-        await treasury.approveToken(activatedToken.address, safeOps.address);
-        await treasury.approveToken(activatedToken.address, controller.address);
-        await controller.approveToken(activatedToken.address, activePool.address);
-        await testDAI.approve(testVault.address, "1000000000000000000000000");
-        await activatedToken.approve(controller.address, "1000000000000000000000000");
-        await activatedToken.approve(activePool.address, "1000000000000000000000000");
-        await activatedToken.approve(safeOps.address, "1000000000000000000000000");
-        await unactivatedToken.approve(controller.address, "1000000000000000000000000");
+        await treasury.approveToken(USDSTa.address, safeOps.address);
+        await treasury.approveToken(USDSTa.address, USDController.address);
+        await treasury.approveToken(ETHSTa.address, safeOps.address);
+        await treasury.approveToken(ETHSTa.address, ETHController.address);
+        await USDController.approveToken(USDSTa.address, USDSTaPool.address);
+        await ETHController.approveToken(ETHSTa.address, ETHSTaPool.address);
+        await testDAI.approve(testDAIVault.address, MAX_UINT);
+        await testETH.approve(testETHVault.address, MAX_UINT);
+        await USDSTa.approve(USDController.address, MAX_UINT);
+        await USDSTa.approve(USDSTaPool.address, MAX_UINT);
+        await USDSTa.approve(safeOps.address, MAX_UINT);
+        await USDST.approve(USDController.address, MAX_UINT);
+        await USDST.approve(safeOps.address, MAX_UINT);
+        await ETHSTa.approve(ETHController.address, MAX_UINT);
+        await ETHSTa.approve(ETHSTaPool.address, MAX_UINT);
+        await ETHSTa.approve(safeOps.address, MAX_UINT);
+        await ETHST.approve(ETHController.address, MAX_UINT);
+        await ETHST.approve(safeOps.address, MAX_UINT);
 
         return { 
-            owner, activatedToken, unactivatedToken, testDAI, testVault, controller, treasury, activePool, safeManager, safeOps
+            owner, USDSTa, USDST, ETHSTa, ETHST, testDAI, testDAIVault, testETHVault,
+            USDController, ETHController, treasury, USDSTaPool, ETHSTaPool, safeManager, safeOps
         };
     }
     
