@@ -14,9 +14,7 @@ interface ISafeManager {
     function adjustSafeBal(
         address _owner,
         uint _index,
-        address _activeToken,
-        uint _amount,
-        bool _add,
+        int _amount,
         uint _mintFeeApplied,
         uint _redemptionFeeApplied
     ) external;
@@ -25,8 +23,8 @@ interface ISafeManager {
         address _owner,
         uint _index,
         address _debtToken,
-        uint _amount,
-        bool _add
+        int _amount,
+        uint _fee
     ) external;
 
     function setSafeStatus(

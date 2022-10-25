@@ -55,7 +55,7 @@ contract SafeOperations is ReentrancyGuard, Common {
      */
     uint public originationFee = 200 * 10 ** 18;    // tokens
 
-    uint public originationFeeCollected;
+    mapping(address => uint) public originationFeesCollected;
 
     uint public minBorrow = 2_000 * 10 ** 18; // tokens
 
@@ -71,8 +71,6 @@ contract SafeOperations is ReentrancyGuard, Common {
         uint redemptionFeeApplied;
         uint debt;
     }
-
-    uint cacheStatus;
 
     constructor(address _safeManager, address _priceFeed) {
         safeManager = _safeManager;
@@ -203,8 +201,6 @@ contract SafeOperations is ReentrancyGuard, Common {
         // E.g., _token = DAI.
         if (validInputToken(_token)) {
 
-            address activeToken = targetController.getActiveToken();
-
             uint apTokens = targetController.deposit(msg.sender, _amount, true);
             console.log(
                 "Deposited %s inputTokens from %s to Controller",
@@ -215,9 +211,7 @@ contract SafeOperations is ReentrancyGuard, Common {
             safeManagerContract.adjustSafeBal({
                 _owner: msg.sender,
                 _index: _index,
-                _activeToken: activeToken,
-                _amount: apTokens,
-                _add: true,
+                _amount: int(apTokens),
                 _mintFeeApplied: 0,
                 _redemptionFeeApplied: _amount
             });
@@ -247,9 +241,7 @@ contract SafeOperations is ReentrancyGuard, Common {
             safeManagerContract.adjustSafeBal({
                 _owner: msg.sender,
                 _index: _index,
-                _activeToken: _token,
-                _amount: apTokens,
-                _add: true,
+                _amount: int(apTokens),
                 _mintFeeApplied: _amount,
                 _redemptionFeeApplied: 0
             });
@@ -269,6 +261,11 @@ contract SafeOperations is ReentrancyGuard, Common {
         nonReentrant
         // returns (uint tokenAmount, int feeCoverage, uint mintFeeChange, uint redemptionFeeChange)
     {
+        (uint apTokenMax, ) = computeWithdrawAllowance(msg.sender, _index);
+        require(
+            apTokenMax >= _amount, "SafeOps: Insufficient withdrawal allowance"
+        );
+
         CacheInit memory cacheInit;
 
         (
@@ -306,9 +303,7 @@ contract SafeOperations is ReentrancyGuard, Common {
         safeManagerContract.adjustSafeBal({
             _owner: msg.sender,
             _index: _index,
-            _activeToken: cacheInit.activeToken,
-            _amount: _amount,   // apTokens
-            _add: false,
+            _amount: int(_amount),   // apTokens
             _mintFeeApplied: 0, // mintFeeChange
             _redemptionFeeApplied: 0    // redemptionFeeChange
         });
@@ -350,8 +345,7 @@ contract SafeOperations is ReentrancyGuard, Common {
             cacheVal.bal,   // apTokens
             cacheVal.mintFeeApplied,
             cacheVal.redemptionFeeApplied,
-            cacheVal.debt, // unactiveTokens
-            cacheVal.locked // apTokens
+            cacheVal.debt // unactiveTokens
         ) = safeManagerContract.getSafeVal(msg.sender, _index);
 
         require(msg.sender == cacheInit.owner, "SafeOps: Owner mismatch");
@@ -398,14 +392,23 @@ contract SafeOperations is ReentrancyGuard, Common {
             console.log("Initialized borrow");
         }
 
-        // Later add mapping (?)
-        originationFeeCollected += originationFee;
+        originationFeesCollected[cacheInit.activeToken] += originationFee;
+
+        safeManagerContract.adjustSafeBal({
+            _owner: cacheInit.owner,
+            _index: _index,
+            // Take originationFee from bal.
+            _amount: int(oFeeShares) * -1,
+            _mintFeeApplied: 0,
+            _redemptionFeeApplied: 0
+        });
 
         safeManagerContract.adjustSafeDebt({
             _owner: cacheInit.owner,
             _index: _index,
             _debtToken: _debtToken,
-            _amount: _amount
+            _amount: int(_amount),
+            _fee: oFeeShares
         });
         console.log("Adjusted Safe debt");
 
@@ -478,6 +481,55 @@ contract SafeOperations is ReentrancyGuard, Common {
 
         // Later change to divPrecisely (?)
         maxBorrow = ((assets - originationFee) * 10_000) / MCR;
+    }
+
+    function computeWithdrawAllowance(address _owner, uint _index)
+        public
+        view
+        returns (uint apTokenMax, uint activeTokenMax)
+    {
+        if (safeManagerContract.getSafeStatus(_owner, _index) != 1) return (0, 0);
+
+        CacheInit memory cacheInit;
+
+        (
+            cacheInit.owner,
+            cacheInit.activeToken,
+            cacheInit.debtToken
+        ) = safeManagerContract.getSafeInit(_owner, _index);
+
+        CacheVal memory cacheVal;
+
+        (
+            cacheVal.bal,   // apTokens
+            cacheVal.mintFeeApplied,
+            cacheVal.redemptionFeeApplied,
+            cacheVal.debt // unactiveTokens
+        ) = safeManagerContract.getSafeVal(_owner, _index);
+
+        // First, find the ActivePool contract of the activeToken.
+        address _activePool = safeManagerContract.getActivePool(cacheInit.activeToken);
+
+        IERC4626 activePool = IERC4626(_activePool);
+
+        // Second, get the pricePerShare for the _bal
+        uint activeTokenBal = activePool.previewRedeem(cacheVal.bal);
+
+        if (cacheInit.debtToken == address(0)) return (cacheVal.bal, activeTokenBal);
+
+        uint activeTokenPrice = priceFeedContract.getPrice(cacheInit.activeToken);
+        console.log("activeToken price: %s", activeTokenPrice);
+        uint debtTokenPrice = priceFeedContract.getPrice(cacheInit.debtToken);
+        console.log("debtToken price: %s", debtTokenPrice);
+
+        uint MCR = safeManagerContract.getActiveToDebtTokenMCR(
+            cacheInit.activeToken,
+            cacheInit.debtToken
+        );
+
+        // activeToken balance($) - (debt($) * MCR)
+        activeTokenMax = (activeTokenBal * activeTokenPrice) - ((cacheVal.debt * debtTokenPrice) * MCR) / 10_000;
+        apTokenMax = activePool.previewMint(activeTokenMax);
     }
 
     function computeCR(address _activeToken, address _debtToken, uint _amount, uint _debtAmount)

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity ^0.8.17;
 
+import "hardhat/console.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "./interfaces/IController.sol";
@@ -180,33 +181,31 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
      * @param _owner The owner of the Safe.
      * @param _index The Safe's index.
      * @param _amount The amount of apTokens.
-     * @param _add Boolean to indicate if _amount subtracts or adds to Safe balance.
+     * @param _mintFeeApplied Change in balance for which mint fee has been applied.
+     * @param _redemptionFeeApplied Change in balance for which redemption fee has been applied.
      */
     function adjustSafeBal(
         address _owner,
         uint _index,
-        address _activeToken,
-        uint _amount,
-        bool _add,
+        int _amount,
         uint _mintFeeApplied,
         uint _redemptionFeeApplied
     )
         external
         onlySafeOps
     {
-        // Additional check to confirm that the activeToken being deposited is correct, may later be removed.
-        require(safe[_owner][_index].activeToken == _activeToken, "SafeManager: activeToken mismatch");
         require(safe[_owner][_index].status == Status(1), "SafeManager: Safe not active");
         
-        if (_add == true) {
-            safe[_owner][_index].bal += _amount;
+        if (_amount > 0) {
+            safe[_owner][_index].bal += uint(_amount);
             safe[_owner][_index].mintFeeApplied += _mintFeeApplied;
             safe[_owner][_index].redemptionFeeApplied += _redemptionFeeApplied;
         } else {
-            require(safe[_owner][_index].bal >= _amount, "SafeManager: Safe cannot have negative balance");
+            require(safe[_owner][_index].bal >= uint(_amount), "SafeManager: Safe cannot have negative balance");
             // When debtTokens are issued, it moves the proportionate amount from 'bal' to 'locked'.
             // Therefore, only consider 'bal' for now.
-            safe[_owner][_index].bal -= _amount;
+            console.log("Adjusting bal downwards");
+            safe[_owner][_index].bal -= uint(_amount);
             safe[_owner][_index].mintFeeApplied -= _mintFeeApplied;
             safe[_owner][_index].redemptionFeeApplied -= _redemptionFeeApplied;
         }
@@ -218,13 +217,13 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
      * @param _index The Safe's index.
      * @param _debtToken The Safe's debtToken.
      * @param _amount The amount of debtTokens.
-     * @param _add Boolean to indicate if _amount subtracts or adds to Safe debt.
+     * @param _fee The amount of apTokens captured as an originationFee.
      */
     function adjustSafeDebt(
         address _owner,
         uint _index,
         address _debtToken,
-        int _amount,
+        int _amount,    // debtTokens
         uint _fee  // apTokens
     )
         external
@@ -233,17 +232,16 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
         require(safe[_owner][_index].debtToken == _debtToken, "SafeManager: debtToken mismatch");
         require(safe[_owner][_index].status == Status(1), "SafeManager: Safe not active");
 
+        // Repaying debt
         if (_amount < 0) {
-
+            require(uint(_amount) <= safe[_owner][_index].debt);
+            safe[_owner][_index].debt -= uint(_amount);
+            safe[_owner][_index].originationFeesPaid += _fee;
         }
-
-        // if (_add == true) {
-        //     // Insert logic to handle max debt allowance / check if owner can be issued more debtTokens (?)
-        //     // Above requirement handled by SafeOps
-        //     safe[_owner][_index].debt += _amount;
-        // } else {
-        //     safe[_owner][_index].debt -= _amount;
-        // }
+        // Increasing debt
+        else {
+            safe[_owner][_index].debt += uint(_amount * -1);
+        }
     }
 
     /**
