@@ -321,9 +321,8 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
 
         uint MCR = activeToDebtTokenMCR[activeToken][debtToken];
         console.log("Minimum Collateralisation Ratio: %s", MCR);
-        uint CR =
-            ((assets * activeTokenPrice / 10**18)
-            .divPrecisely(debt * debtTokenPrice / 10**18)) * 10_000 / 10**18;
+        uint CR = (assets * activeTokenPrice)
+            .divPrecisely(debt * debtTokenPrice).mulTruncate(10_000);
         console.log("Safe Collateralisation Ratio: %s", CR);
 
         if (CR < MCR) return true;

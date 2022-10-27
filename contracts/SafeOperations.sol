@@ -325,13 +325,12 @@ contract SafeOperations is ReentrancyGuard, Common {
 
     /**
      * @notice
-     *  Function to initialize a borrow from a Safe. Once a debtToken has been initialized,
-     *  the owner cannot borrow another type of debtToken from the Safe (e.g., if borrowing
-     *  USDST, cannot then borrow GBPST from the same Safe).
-     * @param _index The Safe to initialize a borrow against.
-     * @param _debtToken The debtToken to be initialized.
+     *  Once a debtToken has been initialized, the owner cannot borrow another type of 
+     *  debtToken from the Safe until it has been paid off.
+     * @param _index The Safe to borrow against.
+     * @param _debtToken The debtToken to be issued.
      * @param _amount The amount of debtTokens to borrow (limited by the Safe bal and CR).
-     * @param _initialize Indicated whether a borrow is being initialized.
+     * @param _initialize Indicates whether a debtToken is being initialized.
      */
     function borrow(uint _index, address _debtToken, uint _amount, bool _initialize)
         external
@@ -476,17 +475,80 @@ contract SafeOperations is ReentrancyGuard, Common {
         }
     }
 
+    /**
+     * @notice Enables activeToken transfers between Safes.
+     * @dev
+     *  Use apTokens for _amount as more efficient and precise.
+     *  Therefore need to perform apToken-activeToken conversion beforehand.
+     * @param _index The index of the Safe to transfer activeTokens from.
+     * @param _amount The amount of apTokens to transfer.
+     * @param _to The address of the Safe owner to transfer activeTokens to.
+     * @param _toIndex ID for the receiver's Safe (must support activeToken).
+     */
     function transferActiveTokens(
-        address _activeToken,
         uint _index,
-        uint _amount,
+        uint _amount,   // apTokens
         address _to,
         uint _toIndex
     )
         external
         nonReentrant
     {
+        // First, get the sender's Safe params.
+        CacheInit memory cacheInit;
 
+        (
+            cacheInit.owner,
+            cacheInit.activeToken,
+            cacheInit.debtToken
+        ) = safeManagerContract.getSafeInit(msg.sender, _index);
+
+        CacheVal memory cacheVal;
+
+        (
+            cacheVal.bal,   // apTokens
+            cacheVal.mintFeeApplied,
+            cacheVal.redemptionFeeApplied,
+            cacheVal.debt // unactiveTokens
+        ) = safeManagerContract.getSafeVal(msg.sender, _index);
+
+        require(msg.sender == cacheInit.owner, "SafeOps: Owner mismatch");
+
+        (uint apTokenMax, ) = computeWithdrawAllowance(msg.sender, _index);
+        require(_amount <= apTokenMax, "SafeOps: Insufficient allownace");
+
+        // Second, get the receiver's Safe params.
+        require(
+            safeManagerContract.getSafeStatus(_to, _toIndex) == 1,
+            "SafeOps: Safe not active"
+        );
+
+        CacheInit memory cacheInitTo;
+
+        (
+            cacheInitTo.owner,
+            cacheInitTo.activeToken,
+            cacheInitTo.debtToken
+        ) = safeManagerContract.getSafeInit(_to, _toIndex);
+
+        require(
+            cacheInit.activeToken == cacheInitTo.activeToken,
+            "SafeOps: Safe does not support activeToken"
+        );
+
+        safeManagerContract.adjustSafeBal({
+            _owner: cacheInit.owner,
+            _index: _index,
+            _amount: _amount,
+            _add: false
+        });
+
+        safeManagerContract.adjustSafeBal({
+            _owner: cacheInitTo.owner,
+            _index: _toIndex,
+            _amount: _amount,
+            _add: true
+        });
     }
 
     function transferDebtTokens(
@@ -622,9 +684,6 @@ contract SafeOperations is ReentrancyGuard, Common {
         uint debtTokenPrice = priceFeedContract.getPrice(_debtToken);
         CR = ((assets * activeTokenPrice) - originationFee)
             .divPrecisely(_debtAmount * debtTokenPrice).mulTruncate(10_000);
-        uint numerator = (assets * activeTokenPrice) - originationFee;
-        uint denominator = _debtAmount * debtTokenPrice;
-        console.log("Numerator: %s Denominator: %s", numerator, denominator);
     }
 
     /**
