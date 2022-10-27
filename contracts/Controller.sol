@@ -78,7 +78,7 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
 
     IUnactivated public unactiveTokenContract;
 
-    ISafeManager safeManagerContract = ISafeManager(safeManager);
+    ISafeManager public safeManagerContract;
 
     /**
      * @dev Boolean to pause receiving deposits.
@@ -116,6 +116,7 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
     constructor(
         address _vault,
         address _treasury,
+        address _safeManager,
         address _inputToken,
         address _activeToken,
         address _unactiveToken
@@ -126,6 +127,10 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
         treasury = _treasury;
 
         treasuryContract = ITreasury(_treasury);
+
+        safeManager = _safeManager;
+
+        safeManagerContract = ISafeManager(safeManager);
 
         activeToken = _activeToken;
 
@@ -205,7 +210,6 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
                 // Safe collateral is stored in its respective ActivePool contract.
                 // Controller holds the apTokens for Safes.
                 // Need to return shares for SafeOps to store apToken bal.
-                // Uses SafeERC20 which might not work.
                 shares = activePool.deposit(
                     _amount,
                     address(this)
@@ -625,6 +629,7 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
         onlyOwner
     {
         safeManager = _safeManager;
+        safeManagerContract = ISafeManager(safeManager);
     }
 
     /**

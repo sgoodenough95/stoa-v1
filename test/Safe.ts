@@ -2,7 +2,7 @@ import { time, loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
 import { expect } from "chai";
 import { ethers } from "hardhat";
-import { ActivePool__factory, Controller__factory } from "../typechain-types";
+import { ActivePool__factory, Controller__factory, Treasury__factory } from "../typechain-types";
 
 const hre = require("hardhat");
 
@@ -11,7 +11,7 @@ describe("Safe", function () {
     async function deployContracts() {
 
         const [owner] = await ethers.getSigners();
-        const MAX_UINT = (2^256 - 1).toString();
+        const MAX_UINT = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
 
         const ActivatedToken = await ethers.getContractFactory("ActivatedToken");
         const UnactivatedToken = await ethers.getContractFactory("UnactivatedToken");
@@ -19,9 +19,9 @@ describe("Safe", function () {
         const TestVault = await ethers.getContractFactory("TestVault");
         const Treasury = await ethers.getContractFactory("Treasury");
         const ActivePool = await ethers.getContractFactory("ActivePool");
-        const Controller = await ethers.getContractFactory("Controller");
         const PriceFeed = await ethers.getContractFactory("PriceFeed");
         const SafeManager = await ethers.getContractFactory("SafeManager");
+        const Controller = await ethers.getContractFactory("Controller");
         const SafeOps = await ethers.getContractFactory("SafeOperations");
         const USDSTa = await ActivatedToken.deploy("Stoa Activated Dollar", "USDSTa");
         const ETHSTa = await ActivatedToken.deploy("Stoa Activated Ethereum", "ETHSTa");
@@ -33,10 +33,13 @@ describe("Safe", function () {
         const testETHVault = await TestVault.deploy(testETH.address, testETH.address, "Test yvETH", "tyvETH");
         const treasury = await Treasury.deploy();
         const USDSTaPool = await ActivePool.deploy(USDSTa.address, "Active Pool USDSTa", "apUSDSTa");
-        const ETHSTaPool = await ActivePool.deploy(USDSTa.address, "Active Pool ETHSTa", "apETHSTa");
+        const ETHSTaPool = await ActivePool.deploy(ETHSTa.address, "Active Pool ETHSTa", "apETHSTa");
+        const priceFeed = await PriceFeed.deploy();
+        const safeManager = await SafeManager.deploy(priceFeed.address);
         const USDController = await Controller.deploy(
             testDAIVault.address,
             treasury.address,
+            safeManager.address,
             testDAI.address,
             USDSTa.address,
             USDST.address
@@ -44,13 +47,12 @@ describe("Safe", function () {
         const ETHController = await Controller.deploy(
             testETHVault.address,
             treasury.address,
+            safeManager.address,
             testETH.address,
             ETHSTa.address,
             ETHST.address
         );
-        const priceFeed = await PriceFeed.deploy();
-        const safeManager = await SafeManager.deploy(priceFeed.address);
-        const safeOps = await SafeOps.deploy(safeManager.address, priceFeed.address);
+        const safeOps = await SafeOps.deploy(safeManager.address, priceFeed.address, treasury.address);
 
         await USDController.rebaseOptIn(USDSTa.address);
         await ETHController.rebaseOptIn(ETHSTa.address);
@@ -70,10 +72,16 @@ describe("Safe", function () {
         await ETHController.setSafeManager(safeManager.address);
         await safeManager.setActivePool(USDSTa.address, USDSTaPool.address);
         await safeManager.setActivePool(ETHSTa.address, ETHSTaPool.address);
+        await safeManager.setUnactiveCounterpart(USDSTa.address, USDST.address);
+        await safeManager.setUnactiveCounterpart(ETHSTa.address, ETHST.address);
+        await safeManager.setActiveToDebtTokenMCR(USDSTa.address, USDST.address, "20000");
+        await safeManager.setActiveToDebtTokenMCR(ETHSTa.address, ETHST.address, "20000");
+        await safeManager.setActiveToDebtTokenMCR(ETHSTa.address, USDST.address, "15000");
+        await safeManager.setPriceFeed(priceFeed.address);
         await priceFeed.setPrice(USDSTa.address, "1000000000000000000");    // $1
         await priceFeed.setPrice(USDST.address, "1000000000000000000"); // $1
-        await priceFeed.setPrice(ETHSTa.address, "1000000000000000000000");    // $1,000
-        await priceFeed.setPrice(ETHST.address, "1000000000000000000000"); // $1,000
+        await priceFeed.setPrice(ETHSTa.address, "1500000000000000000000");    // $1,500
+        await priceFeed.setPrice(ETHST.address, "1500000000000000000000"); // $1,500
 
         await treasury.approveToken(USDSTa.address, safeOps.address);
         await treasury.approveToken(USDSTa.address, USDController.address);
@@ -95,10 +103,36 @@ describe("Safe", function () {
         await ETHST.approve(safeOps.address, MAX_UINT);
 
         return { 
-            owner, USDSTa, USDST, ETHSTa, ETHST, testDAI, testDAIVault, testETHVault,
+            owner, USDSTa, USDST, ETHSTa, ETHST, testDAI, testDAIVault, testETH, testETHVault, priceFeed,
             USDController, ETHController, treasury, USDSTaPool, ETHSTaPool, safeManager, safeOps
         };
     }
+
+    describe("Borrow actions", function () {
+
+        it("Should open Safe", async function () {
+
+            const {
+                owner, testDAI, safeOps, safeManager, USDST, USDSTa, USDController, priceFeed,
+                treasury, USDSTaPool, ETHST, testETH, ETHSTa, ETHController
+            } = await loadFixture(deployContracts);
+
+            await safeOps.openSafe(testETH.address, "100000000000000000000");
+
+            await safeOps.borrow(0, USDST.address, "60000000000000000000000", true);
+
+            console.log(await safeManager.isUnderwater(owner.address, 0));
+
+            // Change ETH price from $1,500 to $500
+            await priceFeed.setPrice(ETHSTa.address, "500000000000000000000");
+
+            console.log(await safeManager.isUnderwater(owner.address, 0));
+
+            // console.log(await safeManager.getSafeVal(owner.address, 0));
+            // console.log(await safeManager.getSafeInit(owner.address, 0));
+            // console.log(await safeManager.getSafeStatus(owner.address, 0));
+        })
+    })
     
     // describe("Rebase Opt-in", function () {
 
@@ -309,7 +343,7 @@ describe("Safe", function () {
     //     });
     // });
 
-    describe("Should open Safe", function () {
+    // describe("Should open Safe", function () {
 
     //     it("Should open Safe with tDAI", async function () {
 
@@ -332,32 +366,32 @@ describe("Safe", function () {
     //         expect(await safeManager.getSafeStatus(owner.address, 0)).to.equal(1);
     //     });
 
-        it("Should open Safe with USDSTa", async function () {
+    //     it("Should open Safe with USDSTa", async function () {
 
-            const { owner, activatedToken, controller, safeManager, safeOps } = await loadFixture(deployContracts);
+    //         const { owner, activatedToken, controller, safeManager, safeOps } = await loadFixture(deployContracts);
 
-            await controller.deposit(owner.address, "10000000000000000000000", true);
+    //         await controller.deposit(owner.address, "10000000000000000000000", true);
 
-            const userUSDSTaBal = await activatedToken.balanceOf(owner.address);
-            console.log(userUSDSTaBal);
+    //         const userUSDSTaBal = await activatedToken.balanceOf(owner.address);
+    //         console.log(userUSDSTaBal);
 
-            await safeOps.openSafe(activatedToken.address, userUSDSTaBal.toString());
+    //         await safeOps.openSafe(activatedToken.address, userUSDSTaBal.toString());
 
-            const safeInitResponse = await safeManager.getSafeInit(owner.address, 0);
-            console.log(safeInitResponse);
+    //         const safeInitResponse = await safeManager.getSafeInit(owner.address, 0);
+    //         console.log(safeInitResponse);
 
-            expect(safeInitResponse[0]).to.equal(owner.address);
-            expect(safeInitResponse[1]).to.equal(activatedToken.address);
-            expect(safeInitResponse[2]).to.equal("0x0000000000000000000000000000000000000000");
+    //         expect(safeInitResponse[0]).to.equal(owner.address);
+    //         expect(safeInitResponse[1]).to.equal(activatedToken.address);
+    //         expect(safeInitResponse[2]).to.equal("0x0000000000000000000000000000000000000000");
 
-            const safeBalResponse = await safeManager.getSafeVal(owner.address, 0);
-            console.log(safeBalResponse);
-            expect(safeBalResponse[0]).to.equal(userUSDSTaBal.toString());
-            // expect(safeBalResponse[2]).to.equal("10000000000000000000000");
+    //         const safeBalResponse = await safeManager.getSafeVal(owner.address, 0);
+    //         console.log(safeBalResponse);
+    //         expect(safeBalResponse[0]).to.equal(userUSDSTaBal.toString());
+    //         // expect(safeBalResponse[2]).to.equal("10000000000000000000000");
 
-            expect(await safeManager.getSafeStatus(owner.address, 0)).to.equal(1);
-        });
-    });
+    //         expect(await safeManager.getSafeStatus(owner.address, 0)).to.equal(1);
+    //     });
+    // });
 
     // describe("Safe deposit", function () {
 

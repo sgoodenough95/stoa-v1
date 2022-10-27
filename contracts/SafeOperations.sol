@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity ^0.8.17;
 
+// import { SafeMath } from "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "hardhat/console.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
@@ -13,6 +14,7 @@ import "./interfaces/IUnactivated.sol";
 import "./interfaces/IPriceFeed.sol";
 import "./interfaces/IUnactivated.sol";
 import "./interfaces/ITreasury.sol";
+import "./utils/StableMath.sol";
 
 /**
  * @dev
@@ -25,6 +27,8 @@ import "./interfaces/ITreasury.sol";
  *  Contains user-operated functions for managing Safes.
  */
 contract SafeOperations is ReentrancyGuard, Common {
+    // using SafeMath for uint256;
+    using StableMath for uint256;
 
     address public safeManager;
 
@@ -72,11 +76,17 @@ contract SafeOperations is ReentrancyGuard, Common {
         uint debt;
     }
 
-    constructor(address _safeManager, address _priceFeed) {
+    constructor(
+        address _safeManager,
+        address _priceFeed,
+        address _treasury
+    ) {
         safeManager = _safeManager;
         priceFeed = _priceFeed;
+        treasury = _treasury;
         safeManagerContract = ISafeManager(safeManager);
         priceFeedContract = IPriceFeed(priceFeed);
+        treasuryContract = ITreasury(treasury);
     }
 
     /**
@@ -111,6 +121,7 @@ contract SafeOperations is ReentrancyGuard, Common {
         require(tokenToController[_token] != address(0), "SafeOps: Controller not found");
 
         address _targetController = tokenToController[_token];
+        console.log("Target controller: %s", _targetController);
 
         IController targetController = IController(_targetController);
 
@@ -211,9 +222,8 @@ contract SafeOperations is ReentrancyGuard, Common {
             safeManagerContract.adjustSafeBal({
                 _owner: msg.sender,
                 _index: _index,
-                _amount: int(apTokens),
-                _mintFeeApplied: 0,
-                _redemptionFeeApplied: _amount
+                _amount: apTokens,
+                _add: true
             });
         }
         // E.g., _token = USDSTa.
@@ -241,9 +251,8 @@ contract SafeOperations is ReentrancyGuard, Common {
             safeManagerContract.adjustSafeBal({
                 _owner: msg.sender,
                 _index: _index,
-                _amount: int(apTokens),
-                _mintFeeApplied: _amount,
-                _redemptionFeeApplied: 0
+                _amount: apTokens,
+                _add: true
             });
         }
         // For now at least, do not allow unactiveToken deposits.
@@ -303,9 +312,8 @@ contract SafeOperations is ReentrancyGuard, Common {
         safeManagerContract.adjustSafeBal({
             _owner: msg.sender,
             _index: _index,
-            _amount: int(_amount),   // apTokens
-            _mintFeeApplied: 0, // mintFeeChange
-            _redemptionFeeApplied: 0    // redemptionFeeChange
+            _amount: _amount,   // apTokens
+            _add: false
         });
 
         // If Safe is empty then mark it as closed.
@@ -369,10 +377,12 @@ contract SafeOperations is ReentrancyGuard, Common {
             _debtToken
         );
         console.log("Max borrow: %s", maxBorrow);
+        // Throws a weird error if require condition not satisfied, need to revisit (?)
+        // Need to make work for cross-asset borrows
         require(_amount <= maxBorrow, "SafeOps: Insufficient funds for borrow amount");
 
-        uint CR = computeCR(cacheInit.activeToken, _debtToken, _amount, cacheVal.bal);
-        console.log("CR: %s", CR);
+        uint CR = computeCR(cacheInit.activeToken, _debtToken, cacheVal.bal, _amount);
+        console.log("CR: %s MCR: %s", CR, MCR);
         require(
             CR > MCR,
             "SafeOps: Insuffiicient collateral posted to meet MCR"
@@ -398,17 +408,17 @@ contract SafeOperations is ReentrancyGuard, Common {
             _owner: cacheInit.owner,
             _index: _index,
             // Take originationFee from bal.
-            _amount: int(oFeeShares) * -1,
-            _mintFeeApplied: 0,
-            _redemptionFeeApplied: 0
+            _amount: oFeeShares,
+            _add: false
         });
 
         safeManagerContract.adjustSafeDebt({
             _owner: cacheInit.owner,
             _index: _index,
             _debtToken: _debtToken,
-            _amount: int(_amount),
-            _fee: oFeeShares
+            _amount: _amount,
+            _fee: oFeeShares,
+            _add: true
         });
         console.log("Adjusted Safe debt");
 
@@ -454,10 +464,16 @@ contract SafeOperations is ReentrancyGuard, Common {
             _owner: cacheInit.owner,
             _index: _index,
             _debtToken: cacheInit.debtToken,
-            _amount: int(_amount) * -1,
-            _fee: 0
+            _amount: _amount,
+            _fee: 0,
+            _add: false
         });
         console.log("Adjusted Safe debt");
+
+        // Reset Safe's debtToken if paid off debt.
+        if (_amount == cacheVal.debt) {
+            safeManagerContract.initializeBorrow(msg.sender, _index, address(0));
+        }
     }
 
     function transferActiveTokens(
@@ -501,21 +517,28 @@ contract SafeOperations is ReentrancyGuard, Common {
         IERC4626 activePool = IERC4626(_activePool);
 
         // Second, get the pricePerShare for the _bal
+        // assets [activeTokens]
         uint assets = activePool.previewRedeem(_bal);
 
         // First need to find originationFee worth of apTokens.
+        // (E.g., 1 ETHSTa = $1k)
         uint activeTokenPrice = priceFeedContract.getPrice(_activeToken);
         console.log("activeToken price: %s", activeTokenPrice);
-        uint oFeeTokens = activeTokenPrice / originationFee;
+
+        // (E.g., 1 ETHSTa = $1k: oFeeTokens = $200 / $1k = 0.2 ETHSTa)
+        // oFeeTokens [activeTokens]
+        uint oFeeTokens = originationFee.divPrecisely(activeTokenPrice);
         console.log("originationFee worth of activeTokens: %s", oFeeTokens);
+
+        // oFeeShares [apTokens]
         oFeeShares = activePool.previewMint(oFeeTokens);
         console.log("originationFee worth of apTokens: %s", oFeeShares);
 
         // E.g., 20,000bp.
         MCR = safeManagerContract.getActiveToDebtTokenMCR(_activeToken, _debtToken);
 
-        // Later change to divPrecisely (?)
-        maxBorrow = ((assets - originationFee) * 10_000) / MCR;
+        // maxBorrow needs to be denominated in debtTokens
+        maxBorrow = (((assets - oFeeTokens) * 10_000) / MCR) * activeTokenPrice / 10**18;
     }
 
     function computeWithdrawAllowance(address _owner, uint _index)
@@ -549,6 +572,7 @@ contract SafeOperations is ReentrancyGuard, Common {
 
         // Second, get the pricePerShare for the _bal
         uint activeTokenBal = activePool.previewRedeem(cacheVal.bal);
+        console.log("Active token bal: %s", activeTokenBal);
 
         if (cacheInit.debtToken == address(0)) return (cacheVal.bal, activeTokenBal);
 
@@ -562,23 +586,45 @@ contract SafeOperations is ReentrancyGuard, Common {
             cacheInit.debtToken
         );
 
-        // activeToken balance($) - (debt($) * MCR)
-        activeTokenMax = (activeTokenBal * activeTokenPrice) - ((cacheVal.debt * debtTokenPrice) * MCR) / 10_000;
-        apTokenMax = activePool.previewMint(activeTokenMax);
+        uint locked = (cacheVal.debt * debtTokenPrice * MCR) / (10**18 * 10_000);
+        console.log("Total locked ($): %s", locked);
+
+        uint collateral = (activeTokenBal * activeTokenPrice) / 10**18;
+        console.log("Safe collateral ($): %s", collateral);
+
+        if (collateral <= locked) {
+            return (0,0);
+        } else {
+            activeTokenMax = (collateral - locked).divPrecisely(activeTokenPrice);
+            apTokenMax = activePool.previewMint(activeTokenMax);
+        }
     }
 
+    /**
+     * @param _activeToken The activeToken posted as collateral.
+     * @param _debtToken The debtToken to be issued.
+     * @param _amount The amount of activeToken collateral.
+     * @param _debtAmount The amount of debtTokens issued.
+     */
     function computeCR(address _activeToken, address _debtToken, uint _amount, uint _debtAmount)
         public
         view
         returns (uint CR)
     {
-        if (safeManagerContract.getUnactiveCounterpart(_activeToken) == _debtToken) {
-            CR = 20_000;
-        } else {
-            uint activeTokenPrice = priceFeedContract.getPrice(_activeToken);
-            uint debtTokenPrice = priceFeedContract.getPrice(_debtToken);
-            CR = ((_amount * activeTokenPrice) - originationFee) / (_debtAmount * debtTokenPrice) * 10_000;
-        }
+        // First, find the ActivePool contract of the activeToken.
+        address _activePool = safeManagerContract.getActivePool(_activeToken);
+        IERC4626 activePool = IERC4626(_activePool);
+
+        // Second, get the pricePerShare for the _bal
+        uint assets = activePool.previewRedeem(_amount);
+
+        uint activeTokenPrice = priceFeedContract.getPrice(_activeToken);
+        uint debtTokenPrice = priceFeedContract.getPrice(_debtToken);
+        CR = ((assets * activeTokenPrice) - originationFee)
+            .divPrecisely(_debtAmount * debtTokenPrice).mulTruncate(10_000);
+        uint numerator = (assets * activeTokenPrice) - originationFee;
+        uint denominator = _debtAmount * debtTokenPrice;
+        console.log("Numerator: %s Denominator: %s", numerator, denominator);
     }
 
     /**

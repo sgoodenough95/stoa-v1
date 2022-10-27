@@ -9,22 +9,31 @@ interface ISafeManager {
 
     function getSafeStatus(address _owner, uint _index) external view returns (uint);
 
-    function initializeSafe(address _owner, address _activeToken, uint _amount, uint _mintFeeApplied, uint _redemptionFeeApplied) external;
+    function initializeSafe(
+        address _owner,
+        address _activeToken,
+        uint _amount,
+        // Leave fees for now, however not part of demo
+        uint _mintFeeApplied,
+        uint _redemptionFeeApplied
+    ) external;
 
     function adjustSafeBal(
         address _owner,
         uint _index,
-        int _amount,
-        uint _mintFeeApplied,
-        uint _redemptionFeeApplied
+        uint _amount,
+        // uint _mintFeeApplied,
+        // uint _redemptionFeeApplied,
+        bool _add
     ) external;
 
     function adjustSafeDebt(
         address _owner,
         uint _index,
         address _debtToken,
-        int _amount,
-        uint _fee
+        uint _amount,
+        uint _fee,
+        bool _add
     ) external;
 
     function setSafeStatus(

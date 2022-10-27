@@ -9,6 +9,7 @@ import "./interfaces/IERC4626.sol";
 import "./interfaces/IActivated.sol";
 import "./interfaces/ISafeOperations.sol";
 import "./interfaces/IPriceFeed.sol";
+import "./utils/StableMath.sol";
 import { RebaseOpt } from "./utils/RebaseOpt.sol";
 import { Common } from "./utils/Common.sol";
 
@@ -25,6 +26,7 @@ import { Common } from "./utils/Common.sol";
  *  are purely debt tokens (similar to Dai's Vaults).
  */
 contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
+    using StableMath for uint256;
 
     address public priceFeed;
 
@@ -191,33 +193,26 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
      * @param _owner The owner of the Safe.
      * @param _index The Safe's index.
      * @param _amount The amount of apTokens.
-     * @param _mintFeeApplied Change in balance for which mint fee has been applied.
-     * @param _redemptionFeeApplied Change in balance for which redemption fee has been applied.
+     * @param _add Boolean to indicate if adding or subtracting.
      */
     function adjustSafeBal(
         address _owner,
         uint _index,
-        int _amount,
-        uint _mintFeeApplied,
-        uint _redemptionFeeApplied
+        uint _amount,
+        // uint _mintFeeApplied,
+        // uint _redemptionFeeApplied,
+        bool _add
     )
         external
         onlySafeOps
     {
         require(safe[_owner][_index].status == Status(1), "SafeManager: Safe not active");
         
-        if (_amount > 0) {
-            safe[_owner][_index].bal += uint(_amount);
-            safe[_owner][_index].mintFeeApplied += _mintFeeApplied;
-            safe[_owner][_index].redemptionFeeApplied += _redemptionFeeApplied;
+        if (_add == true) {
+            safe[_owner][_index].bal += _amount;
         } else {
-            require(safe[_owner][_index].bal >= uint(_amount), "SafeManager: Safe cannot have negative balance");
-            // When debtTokens are issued, it moves the proportionate amount from 'bal' to 'locked'.
-            // Therefore, only consider 'bal' for now.
-            console.log("Adjusting bal downwards");
-            safe[_owner][_index].bal -= uint(_amount);
-            safe[_owner][_index].mintFeeApplied -= _mintFeeApplied;
-            safe[_owner][_index].redemptionFeeApplied -= _redemptionFeeApplied;
+            require(safe[_owner][_index].bal >= _amount, "SafeManager: Safe cannot have negative balance");
+            safe[_owner][_index].bal -= _amount;
         }
     }
 
@@ -228,13 +223,15 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
      * @param _debtToken The Safe's debtToken.
      * @param _amount The amount of debtTokens.
      * @param _fee The amount of apTokens captured as an originationFee.
+     * @param _add Boolean to indicate if increasing debt.
      */
     function adjustSafeDebt(
         address _owner,
         uint _index,
         address _debtToken,
-        int _amount,    // debtTokens
-        uint _fee  // apTokens
+        uint _amount,    // debtTokens
+        uint _fee,  // apTokens
+        bool _add
     )
         external
         onlySafeOps
@@ -243,14 +240,16 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
         require(safe[_owner][_index].status == Status(1), "SafeManager: Safe not active");
 
         // Repaying debt
-        if (_amount < 0) {
-            require(uint(_amount) <= safe[_owner][_index].debt);
-            safe[_owner][_index].debt -= uint(_amount);
-            safe[_owner][_index].originationFeesPaid += _fee;
+        if (_add == false) {
+            require(
+                _amount <= safe[_owner][_index].debt, "SafeManager: Safe cannot have negative debt"
+            );
+            safe[_owner][_index].debt -= _amount;
         }
         // Increasing debt
         else {
-            safe[_owner][_index].debt += uint(_amount * -1);
+            safe[_owner][_index].debt += _amount;
+            safe[_owner][_index].originationFeesPaid += _fee;
         }
     }
 
@@ -281,29 +280,17 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
     function initializeBorrow(
         address _owner,
         uint _index,
-        // address _activeToken,
-        // uint _toLock,   // apTokens
         address _debtToken
-        // uint _amount,   // tokens
-        // uint _fee   // credits
     )
         external
         onlySafeOps
     {
         safe[_owner][_index].debtToken = _debtToken;
-        // safe[_owner][_index].bal -= _toLock + _fee;
-        // safe[_owner][_index].originationFeesPaid += _fee;
-        // safe[_owner][_index].locked += _toLock;
     }
 
     /**
      * @notice
      *  View function that returns true if a Vault can be liquidated.
-     * @dev
-     *  TBD whether we adopt similar approach to Liquity regarding
-     *  "sorting" Safes (of the same active-debtToken pair) for more efficient
-     *  liquidations, or whether this can be handled externally by simply
-     *  collating and updating a list of Safes w.r.t their CR.
      */
     function isUnderwater(address _owner, uint _index)
         external
@@ -325,13 +312,18 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
         IERC4626 activePool = IERC4626(this.getActivePool(activeToken));
         uint assets = activePool.previewRedeem(safe[_owner][_index].bal);
         console.log("Safe assets: %s", assets);
+        uint debt = safe[_owner][_index].debt;
 
         uint activeTokenPrice = priceFeedContract.getPrice(activeToken);
         console.log("activeToken price: %s", activeTokenPrice);
+        uint debtTokenPrice = priceFeedContract.getPrice(debtToken);
+        console.log("debtToken price: %s", debtTokenPrice);
 
         uint MCR = activeToDebtTokenMCR[activeToken][debtToken];
         console.log("Minimum Collateralisation Ratio: %s", MCR);
-        uint CR = (assets / safe[_owner][_index].debt) * 10_000;
+        uint CR =
+            ((assets * activeTokenPrice / 10**18)
+            .divPrecisely(debt * debtTokenPrice / 10**18)) * 10_000 / 10**18;
         console.log("Safe Collateralisation Ratio: %s", CR);
 
         if (CR < MCR) return true;
@@ -352,6 +344,12 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
         return activeToDebtTokenMCR[_activeToken][_debtToken];
     }
 
+    function setUnactiveCounterpart(address _activeToken, address _unactiveToken)
+        external
+    {
+        activeToUnactiveCounterpart[_activeToken] = _unactiveToken;
+    }
+
     function getUnactiveCounterpart(address _activeToken)
         public
         view
@@ -370,6 +368,7 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
         external
     {
         priceFeed = _priceFeed;
+        priceFeedContract = IPriceFeed(priceFeed);
     }
 
     function getActivePool(address _token)

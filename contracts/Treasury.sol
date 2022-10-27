@@ -25,7 +25,7 @@ contract Treasury is Ownable, Common, RebaseOpt {
     /**
      * @notice Amount of apTokens of a given ActivePool owned by the Treasury.
      */
-    mapping(address => uint) apTokens;
+    mapping(address => uint) public apTokens;
 
     uint controllerBuffer;
 
