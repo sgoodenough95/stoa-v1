@@ -295,7 +295,7 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
     function isUnderwater(address _owner, uint _index)
         external
         view
-        returns (bool)
+        returns (bool, uint CR, uint assets)
     {
         address activeToken = safe[_owner][_index].activeToken;
         address debtToken = safe[_owner][_index].debtToken;
@@ -310,7 +310,7 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
         );
 
         IERC4626 activePool = IERC4626(this.getActivePool(activeToken));
-        uint assets = activePool.previewRedeem(safe[_owner][_index].bal);
+        assets = activePool.previewRedeem(safe[_owner][_index].bal);
         console.log("Safe assets: %s", assets);
         uint debt = safe[_owner][_index].debt;
 
@@ -321,12 +321,34 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
 
         uint MCR = activeToDebtTokenMCR[activeToken][debtToken];
         console.log("Minimum Collateralisation Ratio: %s", MCR);
-        uint CR = (assets * activeTokenPrice)
+        CR = (assets * activeTokenPrice)
             .divPrecisely(debt * debtTokenPrice).mulTruncate(10_000);
         console.log("Safe Collateralisation Ratio: %s", CR);
 
-        if (CR < MCR) return true;
-        else return false;
+        if (CR > MCR) return (true, CR, assets);
+        else return (false, CR, assets);
+    }
+
+    function getMaxBorrow(address _owner, uint _index, address _debtToken)
+        public
+        view
+        returns (uint maxBorrow)
+    {
+        address activeToken = safe[_owner][_index].activeToken;
+        address debtToken = safe[_owner][_index].debtToken;
+
+        IERC4626 activePool = IERC4626(this.getActivePool(activeToken));
+        uint assets = activePool.previewRedeem(safe[_owner][_index].bal);
+
+        uint activeTokenPrice = priceFeedContract.getPrice(activeToken);
+
+        if (debtToken == address(0)) {
+            debtToken = _debtToken;
+        }
+
+        uint MCR = getActiveToDebtTokenMCR(activeToken, debtToken);
+
+        maxBorrow = ((assets * 10_000) / MCR) * activeTokenPrice / 10**18;
     }
 
     function setActiveToDebtTokenMCR(address _activeToken, address _debtToken, uint _MCR)

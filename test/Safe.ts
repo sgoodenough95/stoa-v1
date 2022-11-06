@@ -119,9 +119,13 @@ describe("Safe", function () {
 
             await safeOps.openSafe(testETH.address, "100000000000000000000");
 
+            const test = await safeOps.computeBorrowAllowance(ETHSTa.address, "100000000000000000000", USDST.address);
+            console.log(test);
+
             await safeOps.borrow(0, USDST.address, "60000000000000000000000", true);
 
             console.log(await safeManager.isUnderwater(owner.address, 0));
+            console.log("Max borrow: " + await safeManager.getMaxBorrow(owner.address, 0, USDST.address));
 
             // Change ETH price from $1,500 to $500
             await priceFeed.setPrice(ETHSTa.address, "500000000000000000000");

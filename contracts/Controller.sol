@@ -107,7 +107,7 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
     /**
      * @dev Minimum amounts.
      */
-    uint256 MIN_AMOUNT = 20e18; // $20
+    // uint256 MIN_AMOUNT = 20e18; // $20
     uint256 private dust = 1e16;
 
     /**
@@ -170,7 +170,7 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
         nonReentrant
         returns (uint shares)
     {
-        require(_amount > MIN_AMOUNT, "Controller: Amount too low");
+        // require(_amount > MIN_AMOUNT, "Controller: Amount too low");
 
         // Use _depositor in place of msg.sender to check balance of depositor if called
         // via SafeOperations contract.
@@ -403,7 +403,7 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
             activeTokenContractERC20.balanceOf(msg.sender) >= _amount,
             "Controller: Insufficent active token balance"
         );
-        require(_amount > MIN_AMOUNT, "Controller: Amount too low");
+        // require(_amount > MIN_AMOUNT, "Controller: Amount too low");
 
         uint _redemptionFee = computeFee(_amount, false);
         uint redemptionAmount = _amount - _redemptionFee;
