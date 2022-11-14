@@ -30,38 +30,39 @@ contract SafeOperations is ReentrancyGuard, Common {
     // using SafeMath for uint256;
     using StableMath for uint256;
 
-    address public safeManager;
+    address public safeManager; // N
 
-    address public treasury;
+    address public treasury;    // N
 
-    address public priceFeed;
+    address public priceFeed;   // N
 
-    ISafeManager safeManagerContract;
+    ISafeManager safeManagerContract;   // N
 
-    ITreasury treasuryContract;
+    ITreasury treasuryContract; // N
 
-    IPriceFeed priceFeedContract;
+    IPriceFeed priceFeedContract;   // N
 
-    mapping(address => address) public tokenToController;
+    mapping(address => address) public tokenToController;   // N/X
 
     /**
      * @dev
      *  Later use for self-repaying loan logic.
      */
-    mapping(address => bool) public isActiveToken;
+    mapping(address => bool) public isActiveToken;  // N-not because Diamond
+    // Replaced by 'activeToUnactiveCounterpart'
 
-    mapping(address => address) public activeToInputToken;
+    mapping(address => address[]) public activeToInputTokens;
 
     /**
      * @notice
      *  One-time fee charged upon debt issuance, measured in basis points.
      *  Leave as fixed for now.
      */
-    uint public originationFee = 200 * 10 ** 18;    // tokens
+    uint public originationFee = 200 * 10 ** 18;    // tokens   // X
 
-    mapping(address => uint) public originationFeesCollected;
+    mapping(address => uint) public originationFeesCollected;   // X
 
-    uint public minBorrow = 2_000 * 10 ** 18; // tokens
+    uint public minBorrow = 2_000 * 10 ** 18; // tokens // X
 
     struct CacheInit {
         address owner;

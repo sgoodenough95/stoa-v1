@@ -35,7 +35,7 @@ import { Common } from "./utils/Common.sol";
  */
 contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
 
-    address public safeManager;
+    address public safeManager; // N
 
     /**
      * @notice
@@ -44,11 +44,11 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
      *  Allocates as necessary (e.g., depositing USDST backing
      *  tokens into the Curve USDST AcivePool).
      */
-    address public treasury;
+    address public treasury;    // N
     
-    address public activeToken;
-    address public unactiveToken;
-    address public inputToken;
+    address public activeToken; // N
+    address public unactiveToken;   // N
+    address public inputToken;  // N
 
     /**
      * @dev

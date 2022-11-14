@@ -28,9 +28,9 @@ import { Common } from "./utils/Common.sol";
 contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
     using StableMath for uint256;
 
-    address public priceFeed;
+    address public priceFeed;   // N
 
-    IPriceFeed priceFeedContract;
+    IPriceFeed priceFeedContract;   // N
 
     /**
      * @dev
@@ -39,17 +39,17 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
      *  E.g., Safe 1: BTCSTa => USDST, Safe 2: BTCSTa => EURST.
      *  Reason being, for now, only allow one debtToken per Safe.
      */
-    mapping(address => uint) currentSafeIndex;
+    mapping(address => uint) currentSafeIndex;  // X
 
     /**
      * @dev Safe owner => safeIndex => Safe.
      */
-    mapping(address => mapping(uint => Safe)) public safe;
+    mapping(address => mapping(uint => Safe)) public safe;  // X
 
     /**
      * @dev Referred to by other contracts.
      */
-    mapping(address => address) public tokenToAP;
+    mapping(address => address) public tokenToAP;   // X
 
     /**
      * @dev activeToken-debtToken => Max Collateralization Ratio.
@@ -61,28 +61,28 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
      *  If returns 0, then the debtToken is not supported for the activeToken,
      *  and vice versa.
      */
-    mapping(address => mapping(address => uint)) public activeToDebtTokenMCR;
+    mapping(address => mapping(address => uint)) public activeToDebtTokenMCR;   // X
 
-    mapping(address => address) public activeToUnactiveCounterpart;
+    mapping(address => address) public activeToUnactiveCounterpart; // X
 
     /**
      * @dev Start with one available debtToken per activeToken to begin with.
      */
-    mapping(address => address[]) public activeTokenToSupportedDebtTokens;
+    mapping(address => address[]) public activeTokenToSupportedDebtTokens;  // X
 
     /**
      * @notice
      *  Minimum amount of debtToken that can be minted upon a borrow request.
      *  E.g., Min amount of 100 USDST can be minted upon borrow.
      */
-    mapping(address => uint) debtTokenMinMint;
+    mapping(address => uint) debtTokenMinMint;  // X
 
     enum Status {
         nonExistent,
         active,
         closedByOwner,
         closedByLiquidation
-    }
+    }   // X
 
     /**
      * @notice
@@ -111,7 +111,7 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
         uint debt;  // tokens
         uint index;
         Status status;
-    }
+    }   // X
 
     constructor(address _priceFeed) {
         priceFeed = _priceFeed;
@@ -325,8 +325,8 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
             .divPrecisely(debt * debtTokenPrice).mulTruncate(10_000);
         console.log("Safe Collateralisation Ratio: %s", CR);
 
-        if (CR > MCR) return (true, CR, assets);
-        else return (false, CR, assets);
+        if (CR > MCR) return (false, CR, assets);
+        else return (true, CR, assets);
     }
 
     function getMaxBorrow(address _owner, uint _index, address _debtToken)
