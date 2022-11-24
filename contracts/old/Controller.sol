@@ -174,10 +174,10 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
 
         // Use _depositor in place of msg.sender to check balance of depositor if called
         // via SafeOperations contract.
-        require(
-            inputTokenContract.balanceOf(_depositor) >= _amount,
-            "Controller: Depositor has insufficient funds"
-        );
+        // require(
+        //     inputTokenContract.balanceOf(_depositor) >= _amount,
+        //     "Controller: Depositor has insufficient funds"
+        // );
 
         // Approve _inputTokenContract first before initiating transfer
         // for vault to spend (transfer directly from depositor to vault)
