@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.7;
 
+import { LibDiamond } from ".././diamond/libs/LibDiamond.sol";
+
 /**
  * @dev Leave for now, may not need for Diamond
  */
@@ -17,12 +19,38 @@ struct CacheVal {
     uint debt;
 }
 
-struct YieldTokenParams {
+// e.g., DAI
+struct UnderlyingTokenParams {
     // May later need if handling USDT.
-    uint8 decimals;
-    
-    uint8 adapterId;
+    uint8   decimals;
+    uint256 conversionFactor;
+    uint8   enabled;
+}
 
+// e.g., yvDAI
+// Change to 'TokenParams' (?)
+struct YieldTokenParams {
+    // uint8   decimals;
+    address underlyingToken;
+    address activeToken;
+    address unactiveToken;
+    address yieldVenue;
+    // Limit for the amount of underlying tokens that can be deposited.
+    uint256 depositLimit;
+    uint8   enabled;
+}
+
+// e.g., yvDAIST
+struct StoaTokenParams {
+    uint8   rebasing;
+    address yieldToken;
+    uint8   enabled;
+}
+
+// e.g., ap-yvDAIST (share tokens, used to track Safe bals)
+struct ActivePoolTokenParams {
+    address stoaToken;
+    uint8   enabled;
 }
 
 struct ActivatorAccount {
@@ -50,7 +78,6 @@ struct AppStorage {
     /// @dev the underlyinToken token to be received
     address underlyingToken;
 
-    
     // ControllerFacet
     // address safeManager;
     // /**
@@ -94,7 +121,12 @@ struct AppStorage {
      */
     // E.g., DAI => DAI Vault.
     mapping(address => address) tokenToVenue;
-    mapping(address => uint)    unactiveRedemptionAllowance;
+    mapping(address => mapping(address => uint))unactiveRedemptionAllowance;
+    mapping(address => UnderlyingTokenParams)   _underlyingTokens;
+    mapping(address => YieldTokenParams)        _yieldTokens;
+    mapping(address => StoaTokenParams)         _stoaTokens;
+    mapping(address => ActivePoolTokenParams)   _activePoolTokens;
+
     /**
      * @notice Stat collection.
      */
@@ -109,10 +141,15 @@ struct AppStorage {
     /**
      * @notice Fees in basis points (e.g., 30 = 0.3%).
     */
-    mapping(address => uint) mintFee;
-    mapping(address => uint) redemptionFee;
-    mapping(address => uint) mgmtFee;
-    mapping(address => uint) originationFee;
+    mapping(address => uint256) mintFee;
+    mapping(address => uint256) redemptionFee;
+    mapping(address => uint256) mgmtFee;
+    mapping(address => uint256) originationFee;
+
+    /**
+     * @notice Limits
+     */
+    mapping(address => uint256) minDeposit;
 
     /**
      * @dev
@@ -135,8 +172,9 @@ struct AppStorage {
 
 library LibAppStorage {
     function diamondStorage() internal pure returns (AppStorage storage ds) {
+        bytes32 position = LibDiamond.DIAMOND_STORAGE_POSITION;
         assembly {
-            ds.slot := 0
+            ds.slot := position
         }
     }
 

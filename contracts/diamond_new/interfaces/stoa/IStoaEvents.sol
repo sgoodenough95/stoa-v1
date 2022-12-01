@@ -16,6 +16,8 @@ interface IStoaEvents {
     /// @param recipient    The address that received the deposited funds.
     event Deposit(address indexed sender, address indexed yieldToken, uint256 amount, address recipient);
 
+    event Mint(address indexed depositor, address indexed stoaToken, uint256 amount);
+
     event SafeOpened();
 
 }
