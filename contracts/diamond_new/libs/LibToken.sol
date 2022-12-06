@@ -3,7 +3,7 @@ pragma solidity ^0.8.7;
 
 import {
     AppStorage,
-    YieldTokenParams,
+    RefTokenParams,
     LibAppStorage
 } from "./LibAppStorage.sol";
 import { LibTreasury } from "./LibTreasury.sol";
@@ -16,123 +16,155 @@ library LibToken {
     uint256 constant BPS = 10_000;
 
     function _wrap(
-        address yieldToken,
+        address activeToken,
         uint256 amount,
-        address depositor
-        // uint256 minimumAmountOut
+        address depositFrom
     ) internal returns (uint256 shares) {
         AppStorage storage s = LibAppStorage.diamondStorage();
 
-        YieldTokenParams memory yieldTokenParams = s._yieldTokens[yieldToken];
+        RefTokenParams memory refTokenParams = s._refTokens[activeToken];
 
-        IERC4626 yieldVenue = IERC4626(yieldTokenParams.yieldVenue);
+        IERC4626 vault = IERC4626(refTokenParams.vaultToken);
 
-        shares = yieldVenue.deposit(amount, address(this), depositor);
+        shares = vault.deposit(amount, address(this), depositor);
     }
 
     function _mint(
-        address yieldToken,
+        address activeToken,
         uint256 shares,
-        address depositor,  // msg.sender (?)
-        uint8   activeToken // gas overhead (?)
-    ) internal returns (uint256 tokens) {
+        address recipient,
+        uint8   activated
+    ) internal returns (uint256 stoaTokens) {
         AppStorage storage s = LibAppStorage.diamondStorage();
 
-        YieldTokenParams memory yieldTokenParams = s._yieldTokens[yieldToken];
+        RefTokenParams memory refTokenParams = s._refTokens[activeToken];
 
-        IERC4626 yieldVenue = IERC4626(yieldTokenParams.yieldVenue);
+        IERC4626 vault = IERC4626(refTokenParams.vaultToken);
 
-        tokens = yieldVenue.previewRedeem(shares);
+        stoaTokens = vault.previewRedeem(shares);
 
         uint256 mintFee         = _computeFee(
             yieldTokenParams.activeToken,
-            tokens,
+            stoaTokens,
             0
         );
-        uint256 mintAfterFee    = tokens - mintFee;
+        uint256 mintAfterFee    = stoaTokens - mintFee;
 
-        if (activeToken == 0) {
-            IStoaToken(yieldTokenParams.activeToken).mint(address(this), tokens);
+        if (activated == 0) {
+            IStoaToken(activeToken).mint(address(this), stoaTokens);
 
             LibTreasury._adjustBackingReserve(
-                yieldTokenParams.unactiveToken,
-                yieldTokenParams.activeToken,
+                refTokenParams.unactiveToken,
+                activeToken,
                 int(mintAfterFee)
             );
 
-            IStoaToken(yieldTokenParams.unactiveToken).mint(depositor, mintAfterFee);
+            IStoaToken(refTokenParams.unactiveToken).mint(recipient, mintAfterFee);
 
-            s.unactiveRedemptionAllowance[yieldTokenParams.unactiveToken][depositor]
+            // Increment redemption allowance for msg.sender (may or may not be recipient).
+            s.unactiveRedemptionAllowance[refTokenParams.unactiveToken][msg.sender]
                 += mintAfterFee;
-        } else if (activeToken == 1) {
+        } else if (activated == 1) {
             if (mintFee > 0) {
-                IStoaToken(yieldTokenParams.activeToken).mint(address(this), mintFee);
+                IStoaToken(activeToken).mint(address(this), mintFee);
             }
-            IStoaToken(yieldTokenParams.activeToken).mint(depositor, mintAfterFee);
+            IStoaToken(activeToken).mint(recipient, mintAfterFee);
         }
     }
 
     function _burn(
-        address yieldToken,
+        address activeToken,
         uint256 amount,
-        address withdrawer, // msg.sender (?)
-        uint8   underlyingToken,
-        uint8   unactiveInput
+        address recipient,  // Only read when requesting underlyingToken.
+        uint8   requestUnderlying,
+        uint8   inputUnactive
     ) internal returns (uint256 shares) {
         AppStorage storage s = LibAppStorage.diamondStorage();
 
-        YieldTokenParams memory yieldTokenParams = s._yieldTokens[yieldToken];
+        RefTokenParams memory refTokenParams = s._refTokens[activeToken];
 
-        IERC4626 yieldVenue = IERC4626(yieldTokenParams.yieldVenue);
+        IERC4626 vault = IERC4626(refTokenParams.vaultToken);
 
         uint256 redemptionFee       = _computeFee(
-            yieldTokenParams.activeToken,
+            activeToken,
             amount,
             1
         );
         uint256 redemptionAfterFee  = amount - redemptionFee;
 
-        if (unactiveInput == 1) {
-            IStoaToken(yieldTokenParams.activeToken).burn(address(this), amount);
+        // Do not apply a fee if converting from unactiveToken to activeToken.
+        // Only callable via unactiveRedemption().
+        if (inputUnactive == 1) {
+            IStoaToken(activeToken).burn(address(this), amount);
+            s.unactiveRedemptionAllowance[refTokenParams.unactiveToken][msg.sender]
+                -= amount;
         } else {
-            IStoaToken(yieldTokenParams.activeToken).burn(address(this), redemptionAfterFee);
+            IStoaToken(activeToken).burn(address(this), redemptionAfterFee);
         }
 
-        shares = yieldVenue.convertToShares(amount);
+        shares = vault.convertToShares(amount);
 
-        if (underlyingToken == 1) {
-            yieldVenue.redeem(shares, withdrawer, address(this));
+        if (requestUnderlying == 1) {
+            vault.redeem(shares, recipient, address(this));
         }
     }
 
     function _ensureEnabled(
-        address yieldToken
+        address activeToken
     ) internal view returns (uint8) {
 
         AppStorage storage s = LibAppStorage.diamondStorage();
 
-        YieldTokenParams memory yieldTokenParams = s._yieldTokens[yieldToken];
-        address underlyingToken = yieldTokenParams.underlyingToken;
+        RefTokenParams memory refTokenParams = s._refTokens[activeToken];
 
-        _checkYieldTokenEnabled(yieldToken);
-        _checkUnderlyingTokenEnabled(underlyingToken);
+        _checkVaultTokenEnabled(refTokenParams.vaultToken);
+        _checkUnderlyingTokenEnabled(refTokenParams.underlyingToken);
 
         // _checkLoss(yieldToken);
         return 1;
     }
 
-    function _checkYieldTokenEnabled(address yieldToken) internal view {
+    function _checkVaultTokenEnabled(address vaultToken) internal view {
         AppStorage storage s = LibAppStorage.diamondStorage();
-        if (s._yieldTokens[yieldToken].enabled != 1) {
-            revert IStoaErrors.TokenDisabled(yieldToken);
+        if (s._vaultTokens[vaultToken].enabled != 1) {
+            revert IStoaErrors.TokenDisabled(vaultToken);
         }
     }
 
     function _checkUnderlyingTokenEnabled(address underlyingToken) internal view {
         AppStorage storage s = LibAppStorage.diamondStorage();
-        if (s._yieldTokens[underlyingToken].enabled != 1) {
+        if (s._underlyingTokens[underlyingToken].enabled != 1) {
             revert IStoaErrors.TokenDisabled(underlyingToken);
         }
+    }
+
+    function _rebaseOptIn(
+        address activeToken
+    ) internal {
+        IStoaToken(activeToken).rebaseOptIn();
+    }
+
+    function _rebaseOptOut(
+        address activeToken
+    ) internal {
+        IStoaToken(activeToken).rebaseOptOut();
+    }
+
+    function _totalValue(
+        address vaultToken
+    ) internal view returns (uint256 value) {
+        // initialized (?)
+
+        value = IERC4626(vaultToken).maxWithdraw(address(this));
+    }
+
+    function _previewRedeem(
+        address vaultToken,
+        uint256 shares
+    ) internal view returns (uint256 assets) {
+        // initialized (?)
+
+        assets = IERC4626(vaultToken).previewRedeem(shares);
     }
 
     function _computeFee(

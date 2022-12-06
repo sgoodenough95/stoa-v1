@@ -9,4 +9,10 @@ interface IStoaToken {
     function mint(address _to, uint _amount) external;
 
     function burn(address _from, uint _amount) external;
+
+    function changeSupply(uint _newTotalSupply) external;
+
+    function rebaseOptIn() external;
+
+    function rebaseOptOut() external;
 }

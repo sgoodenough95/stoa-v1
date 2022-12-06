@@ -27,14 +27,19 @@ struct UnderlyingTokenParams {
     uint8   enabled;
 }
 
+struct VaultTokenParams {
+    uint8 enabled;
+}
+
 // e.g., yvDAI
 // Change to 'TokenParams' (?)
-struct YieldTokenParams {
+// activeToken maps to an underlyingToken (e.g., DAI) and a vaultToken (e.g., yvDAI).
+// underlyingToken and vaultToken can be modified (e.g., via PCV).
+struct RefTokenParams {
     // uint8   decimals;
-    address underlyingToken;
-    address activeToken;
-    address unactiveToken;
-    address yieldVenue;
+    address underlyingToken;    // modifiable
+    address vaultToken;         // modifiable
+    address unactiveToken;      // constant
     // Limit for the amount of underlying tokens that can be deposited.
     uint256 depositLimit;
     uint8   enabled;
@@ -43,7 +48,7 @@ struct YieldTokenParams {
 // e.g., yvDAIST
 struct StoaTokenParams {
     uint8   rebasing;
-    address yieldToken;
+    // address yieldToken;
     uint8   enabled;
 }
 
@@ -123,7 +128,9 @@ struct AppStorage {
     mapping(address => address) tokenToVenue;
     mapping(address => mapping(address => uint))unactiveRedemptionAllowance;
     mapping(address => UnderlyingTokenParams)   _underlyingTokens;
-    mapping(address => YieldTokenParams)        _yieldTokens;
+    mapping(address => VaultTokenParams)        _vaultTokens;
+    // 'activeToken' is used as the key to fetch reference token parameters.
+    mapping(address => RefTokenParams)          _refTokens;
     mapping(address => StoaTokenParams)         _stoaTokens;
     mapping(address => ActivePoolTokenParams)   _activePoolTokens;
 
@@ -132,7 +139,7 @@ struct AppStorage {
      */
     mapping(address => uint) amountDeposited;
     mapping(address => uint) amountWithdrawn;
-    mapping(address => uint) holderTotalYieldAccrued;
+    mapping(address => uint) holderYieldAccrued;
     mapping(address => uint) stoaYieldAccrued;  // Can add for specific token
     mapping(address => uint) originationFeesCollected;
     mapping(address => mapping(address => uint)) accruedYield;
@@ -150,6 +157,7 @@ struct AppStorage {
      * @notice Limits
      */
     mapping(address => uint256) minDeposit;
+    mapping(address => uint256) minWithdraw;
 
     /**
      * @dev

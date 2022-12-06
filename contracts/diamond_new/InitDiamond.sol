@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 
 import { AppStorage } from "./libs/LibAppStorage.sol";
 import { LibDiamond } from "./diamond/libs/LibDiamond.sol";
+import { LibToken } from "./libs/LibToken.sol";
 
 contract InitDiamond {
     AppStorage internal s;
@@ -14,17 +15,20 @@ contract InitDiamond {
         // address ETHST;
         address tDAI;
         // address tETH;
-        address USDSTaPool;
+        address apUSDSTa;
         // address ETHSTaPool;
-        address USDSTPool;
+        address apUSDST;
         // address ETHSTPool;
-        address tDAIVenue;
+        address vtDAI;
     }
     
     function init(Args memory _args) external {
-        s.tokenToVenue[_args.tDAI]  = _args.tDAIVenue;
-        s.tokenToAP[_args.USDSTa]   = _args.USDSTaPool;
-        s.tokenToAP[_args.USDST]    = _args.USDSTPool;
+        // Rebase opt-in
+        LibToken._rebaseOptIn(_args.vtDAI);
+
+        s.tokenToVenue[_args.tDAI]  = _args.vtDAI;
+        s.tokenToAP[_args.USDSTa]   = _args.apUSDST;
+        s.tokenToAP[_args.USDST]    = _args.apUSDST;
 
         // LibDiamond.DiamondStorage storage ds = LibDiamond.diamondStorage();
     }
