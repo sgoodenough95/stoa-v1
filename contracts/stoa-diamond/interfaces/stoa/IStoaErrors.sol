@@ -12,7 +12,13 @@ interface IStoaErrors {
 
     error IllegalRebase(uint256 yield);
 
+    error InsufficientDepositAmount(uint256 amount);
+
+    error InsufficientWithdrawAmount(uint256 amount);
+
     error InsufficientRedemptionAllowance(uint256 amount);
+
+    error InsufficientClaimableReserves(uint256 amount);
 
     error MaxSlippageExceeded(uint256 amount, uint256 minimumAmountOut);
 }
