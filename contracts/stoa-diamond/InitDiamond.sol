@@ -2,7 +2,7 @@
 pragma solidity ^0.8.0;
 
 import { AppStorage } from "./libs/LibAppStorage.sol";
-import { LibDiamond } from "./diamond/libs/LibDiamond.sol";
+import { LibDiamond } from "./diamond-core/libs/LibDiamond.sol";
 import { LibToken } from "./libs/LibToken.sol";
 
 contract InitDiamond {
@@ -10,26 +10,28 @@ contract InitDiamond {
 
     struct Args {
         address USDSTa;
-        // address ETHSTa;
         address USDST;
-        // address ETHST;
-        address tDAI;
-        // address tETH;
-        address apUSDSTa;
-        // address ETHSTaPool;
-        address apUSDST;
-        // address ETHSTPool;
-        address vtDAI;
+        address DAI;
+        address yvDAI;
     }
     
     function init(Args memory _args) external {
         // Rebase opt-in
-        LibToken._rebaseOptIn(_args.vtDAI);
+        LibToken._rebaseOptIn(_args.USDSTa);
 
-        s.tokenToVenue[_args.tDAI]  = _args.vtDAI;
-        s.tokenToAP[_args.USDSTa]   = _args.apUSDST;
-        s.tokenToAP[_args.USDST]    = _args.apUSDST;
+        s._refTokens[_args.USDSTa].underlyingToken  = _args.DAI;
+        s._refTokens[_args.USDSTa].vaultToken       = _args.yvDAI;
+        s._refTokens[_args.USDSTa].unactiveToken    = _args.USDST;
 
-        // LibDiamond.DiamondStorage storage ds = LibDiamond.diamondStorage();
+        s._refTokens[_args.USDSTa].enabled      = 1;
+        s._underlyingTokens[_args.DAI].enabled  = 1;
+        s._vaultTokens[_args.yvDAI].enabled     = 1;
+
+        s.minDeposit[_args.DAI]     = 20 * 10**18;
+        s.minWithdraw[_args.DAI]    = 50 * 10**18;
+
+        s.mintFee[_args.USDSTa]         = 30;
+        s.redemptionFee[_args.USDSTa]   = 30;
+        s.conversionFee[_args.USDSTa]   = 10;
     }
 }

@@ -125,7 +125,8 @@ library LibToken {
         RefTokenParams memory refTokenParams = s._refTokens[activeToken];
 
         uint256 fee     = _computeFee(
-            refTokenParams.unactiveToken,
+            // Only consider activeToken.
+            activeToken,
             amount,
             feeType
         );
@@ -189,7 +190,7 @@ library LibToken {
         IERC4626 vault = IERC4626(refTokenParams.vaultToken);
 
         uint256 fee       = _computeFee(
-            refTokenParams.unactiveToken,
+            activeToken,
             amount,
             feeType
         );
@@ -213,6 +214,10 @@ library LibToken {
 
         RefTokenParams memory refTokenParams = s._refTokens[activeToken];
 
+        if (refTokenParams.enabled != 1) {
+            revert IStoaErrors.TokenDisabled(activeToken);
+        }
+
         _checkVaultTokenEnabled(refTokenParams.vaultToken);
         _checkUnderlyingTokenEnabled(refTokenParams.underlyingToken);
 
@@ -232,6 +237,36 @@ library LibToken {
         if (s._underlyingTokens[underlyingToken].enabled != 1) {
             revert IStoaErrors.TokenDisabled(underlyingToken);
         }
+    }
+
+    function _toggleEnabledActiveToken(
+        address activeToken
+    ) internal returns (uint8 enabled) {
+        AppStorage storage s = LibAppStorage.diamondStorage();
+        if (s._refTokens[activeToken].enabled == 1) {
+            s._refTokens[activeToken].enabled = 0;
+        } else s._refTokens[activeToken].enabled = 1;
+        return s._refTokens[activeToken].enabled;
+    }
+
+    function _toggleEnabledVaultToken(
+        address vaultToken
+    ) internal returns (uint8 enabled) {
+        AppStorage storage s = LibAppStorage.diamondStorage();
+        if (s._vaultTokens[vaultToken].enabled == 1) {
+            s._vaultTokens[vaultToken].enabled = 0;
+        } else s._vaultTokens[vaultToken].enabled = 1;
+        return s._vaultTokens[vaultToken].enabled;
+    }
+
+    function _toggleEnabledUnderlyingToken(
+        address underlyingToken
+    ) internal returns (uint8 enabled) {
+        AppStorage storage s = LibAppStorage.diamondStorage();
+        if (s._underlyingTokens[underlyingToken].enabled == 1) {
+            s._underlyingTokens[underlyingToken].enabled = 0;
+        } else s._underlyingTokens[underlyingToken].enabled = 1;
+        return s._underlyingTokens[underlyingToken].enabled;
     }
 
     function _rebaseOptIn(

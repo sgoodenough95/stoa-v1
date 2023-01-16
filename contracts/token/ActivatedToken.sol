@@ -149,10 +149,10 @@ contract ActivatedToken is ERC20 {
     }
 
     /**
-     * @dev Gets the balance of the specified address.
-     * @param _account Address to query the balance of.
-     * @return A uint256 representing the amount of base units owned by the
-     *         specified address.
+     * @dev     Gets the balance of the specified address.
+     * @param   _account Address to query the balance of.
+     * @return  A uint256 representing the amount of base units owned by the
+     *          specified address.
      */
     function balanceOf(address _account)
         public
@@ -582,12 +582,12 @@ contract ActivatedToken is ERC20 {
 
     /**
      * @dev Modify the supply without minting new tokens. This uses a change in
-     *      the exchange rate between "credits" and OUSD tokens to change balances.
-     * @param _newTotalSupply New total supply of OUSD.
+     *      the exchange rate between "credits" and USDSTa tokens to change balances.
+     * @param _newTotalSupply New total supply of USDSTa.
      */
     function changeSupply(uint256 _newTotalSupply)
         external
-        // onlyVault
+        onlyController
         nonReentrant
     {
         require(_totalSupply > 0, "ActivatedToken: Cannot increase 0 supply");

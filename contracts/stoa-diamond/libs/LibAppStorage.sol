@@ -15,15 +15,6 @@ import { LibDiamond } from ".././diamond-core/libs/LibDiamond.sol";
 //     uint redemptionFeeApplied;
 //     uint debt;
 // }
-// struct UnderlyingTokenParams {
-//     // May later need if handling USDT.
-//     uint8   decimals;
-//     uint256 conversionFactor;
-//     uint8   enabled;
-// }
-// struct VaultTokenParams {
-//     uint8 enabled;
-// }
 // struct StoaTokenParams {
 //     uint8   rebasing;
 //     // address yieldToken;
@@ -48,6 +39,17 @@ import { LibDiamond } from ".././diamond-core/libs/LibDiamond.sol";
 //     int256 exchangedBalance;
 // }
 
+struct UnderlyingTokenParams {
+    // May later need if handling USDT.
+    uint8   decimals;
+    uint256 conversionFactor;
+    uint8   enabled;
+}
+
+struct VaultTokenParams {
+    uint8 enabled;
+}
+
 // activeToken maps to an underlyingToken (e.g., DAI) and a vaultToken (e.g., yvDAI).
 // underlyingToken and vaultToken can be modified (e.g., via PCV).
 struct RefTokenParams {
@@ -66,9 +68,11 @@ struct AppStorage {
     mapping(address => mapping(address => uint256)) _unactiveRedemptions;
     mapping(address => uint256)                     claimableUnactiveBackingReserves;
     mapping(address => mapping(address => int))     backingReserve;
-    
+
     // 'activeToken' is used as the key to fetch reference token parameters.
-    mapping(address => RefTokenParams)              _refTokens; // (I)
+    mapping(address => RefTokenParams)          _refTokens; // (I)
+    mapping(address => UnderlyingTokenParams)   _underlyingTokens;  // (I)
+    mapping(address => VaultTokenParams)        _vaultTokens;   // (I)
 
     mapping(address => uint) holderYieldAccrued;
     mapping(address => uint) stoaYieldAccrued;  // Can add for specific token
@@ -103,9 +107,6 @@ struct AppStorage {
 
     /// @dev    Activator state vars.
     // mapping(address => ActivatorAccount) accounts;
-
-    // mapping(address => UnderlyingTokenParams)   _underlyingTokens;
-    // mapping(address => VaultTokenParams)        _vaultTokens;
     // mapping(address => StoaTokenParams)         _stoaTokens;
     // mapping(address => ActivePoolTokenParams)   _activePoolTokens;
 

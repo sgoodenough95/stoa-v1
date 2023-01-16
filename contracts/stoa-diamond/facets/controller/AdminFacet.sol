@@ -3,11 +3,14 @@ pragma solidity ^0.8.0;
 
 import {
     AppStorage,
-    RefTokenParams
+    RefTokenParams,
+    UnderlyingTokenParams,
+    VaultTokenParams
 } from "../../libs/LibAppStorage.sol";
 import { LibToken } from "../../libs/LibToken.sol";
 import "../../interfaces/IStoa.sol";
 import "../../interfaces/IStoaToken.sol";
+import "../../interfaces/IERC4626.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 contract AdminFacet {
@@ -28,6 +31,36 @@ contract AdminFacet {
         // 5. Enable functions.
 
         // May be split into separate fns + via script.
+
+        uint8 enabled = LibToken._toggleEnabledActiveToken(activeToken);
+        if (enabled != 0) {
+            revert IStoaErrors.TokenDisabled(activeToken);
+        }
+
+        this.pullUnderlyingFromVault(
+            s._refTokens[activeToken].vaultToken,
+            amount,
+            minimumAmountOut
+        );
+
+        this.deployUnderlyingToVault(vault, amount + buffer);
+
+        // Update refTokenParams
+        this.updateRefToken(
+            activeToken,
+            IERC4626(vault).asset(),
+            vault,
+            s._refTokens[activeToken].unactiveToken,
+            s._refTokens[activeToken].depositLimit
+        );
+
+        // Rebase
+        this.rebase(activeToken);
+
+        enabled = LibToken._toggleEnabledActiveToken(activeToken);
+        if (enabled != 1) {
+            revert IStoaErrors.TokenDisabled(activeToken);
+        }
     }
 
     /// @notice Migration to new vault that does not accept same underlyingToken.
@@ -52,22 +85,37 @@ contract AdminFacet {
         // May be split into separate fns + via script.
     }
 
-    function disableVault(
-        address vaultToken
-    ) external {
-
-    }
-
-    function pullUnderlying(
+    /// @notice Pulls underlying without burning Stoa tokens.
+    function pullUnderlyingFromVault(
         address vaultToken,
         uint256 amount,
         uint256 minimumAmountOut
-    ) external returns (uint256 assets) {
+    )   external
+        //onlyAdmin
+        returns (uint256 assets) {
         // Initial checks.
 
+        uint256 _amount = amount > IERC20(vaultToken).balanceOf(address(this))
+            ? IERC20(vaultToken).balanceOf(address(this))
+            : amount;
+
+        assets = IERC4626(vaultToken).redeem(_amount, address(this), address(this));
+        if (assets < minimumAmountOut) {
+            revert IStoaErrors.MaxSlippageExceeded(assets, minimumAmountOut);
+        }
     }
 
-    function onboardToken(
+    function deployUnderlyingToVault(
+        address vaultToken,
+        uint256 amount
+    )   external
+        // onlyAdmin
+        returns (uint256 shares) {
+        
+        shares = IERC4626(vaultToken).deposit(amount, address(this));
+    }
+
+    function updateRefToken(
         address activeToken,
         address underlyingToken,
         address vaultToken,
@@ -83,6 +131,20 @@ contract AdminFacet {
         refTokenParams.depositLimit     = depositLimit;
         refTokenParams.enabled          = 1;
     }
+
+    // function enableToken(
+    //     address token,
+    //     uint8   tokenType
+    // ) external {
+
+    //     if (tokenType == 0) {
+    //         UnderlyingTokenParams storage underlyingTokenParams = s._underlyingTokens[token];
+    //         underlyingTokenParams.enabled = 1;
+    //     } else if (tokenType == 1) {
+    //         VaultTokenParams storage vaultTokenParams = s._vaultTokens[token];
+    //         vaultTokenParams.enabled = 1;
+    //     }   // Remaining args not needed right now.
+    // }
 
     function rebase(
         address activeToken
@@ -109,6 +171,7 @@ contract AdminFacet {
             holderYield = (yield / 10_000) * (10_000 - s.mgmtFee[activeToken]);
             stoaYield = yield - holderYield;
 
+            // NB: Later replace with drip operation to smooth out yield.
             IStoaToken(activeToken).changeSupply(currentSupply + holderYield);
 
             if (stoaYield > 0) {
@@ -121,10 +184,30 @@ contract AdminFacet {
     }
 
     function adjustFee(
-        address activeToken,
-        uint8   feeType,
-        uint256 newFee
+        address token,
+        uint256 fee,    // Basis points.
+        uint8   feeType
     ) external {
 
+        if (feeType == 1) {
+            s.mintFee[token] = fee;
+        } else if (feeType == 2) {
+            s.redemptionFee[token] = fee;
+        } else if (feeType == 3) {
+            s.conversionFee[token] = 4;
+        }   // Remaining args not needed right now.
+    }
+
+    function adjustMinTx(
+        address token,
+        uint256 minTx,
+        uint8   txType
+    ) external {
+
+        if (txType == 0) {
+            s.minDeposit[token] = minTx;
+        } else if (txType == 1) {
+            s.minWithdraw[token] = minTx;
+        }   // Remaining args not needed right now.
     }
 }
