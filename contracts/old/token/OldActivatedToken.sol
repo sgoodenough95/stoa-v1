@@ -21,7 +21,7 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 // import { Initializable } from "../utils/Initializable.sol";
 // import { InitializableERC20Detailed } from "../utils/InitializableERC20Detailed.sol";
-import { StableMath } from "../old/utils/StableMath.sol";
+import { StableMath } from "../utils/StableMath.sol";
 // import { Governable } from "../governance/Governable.sol";
 
 /**
@@ -30,7 +30,7 @@ import { StableMath } from "../old/utils/StableMath.sol";
  * rebasing design. Any integrations with OUSD should be aware.
  */
 
-contract ActivatedToken is ERC20 {
+contract OldActivatedToken is ERC20 {
     using SafeMath for uint256;
     using StableMath for uint256;
 
@@ -59,9 +59,6 @@ contract ActivatedToken is ERC20 {
     mapping(address => uint256) public nonRebasingCreditsPerToken;
     mapping(address => RebaseOptions) public rebaseState;
     mapping(address => uint256) public isUpgraded;
-
-    mapping(address => bool) private whitelisted;
-    mapping(address => bool) private blacklisted;
 
     uint256 private constant RESOLUTION_INCREASE = 1e9;
 
@@ -543,7 +540,6 @@ contract ActivatedToken is ERC20 {
      */
     function rebaseOptIn() public nonReentrant {
         require(_isNonRebasingAccount(msg.sender), "ActivatedToken: Account has not opted out");
-        require(whitelisted[msg.sender], "ActivatedToken: Account not whitelisted");
 
         // Convert balance into the same amount at the current exchange rate
         uint256 newCreditBalance = _creditBalances[msg.sender]
@@ -570,9 +566,7 @@ contract ActivatedToken is ERC20 {
      * address's balance will be part of rebases and the account will be exposed
      * to upside and downside.
      */
-    function rebaseOptInExternal(address _account) public
-        // onlyGovernor
-        nonReentrant {
+    function rebaseOptInExternal(address _account) public nonReentrant {
         require(_isNonRebasingAccount(_account), "ActivatedToken: Account has not opted out");
 
         // Convert balance into the same amount at the current exchange rate
@@ -705,38 +699,4 @@ contract ActivatedToken is ERC20 {
             ? 0
             : _tokenBalance.mulTruncate(_rebasingCreditsPerToken);
     }
-
-    function addToWhitelist(
-        address _account
-    ) external
-    // onlyGovernor
-    {
-        whitelisted[_account] = true;
-    }
-
-    function removeFromWhitelist(
-        address _account
-    ) external
-    // onlyGovernor
-    {
-        whitelisted[_account] = false;
-    }
-
-    function addToBlacklist(
-        address _account
-    ) external
-    // onlyGovernor
-    {
-        blacklisted[_account] = true;
-
-        // Revoke whitelist in case.
-        whitelisted[_account] = false;
-
-        // remove rebase opt in
-        // transfer funds in separate function
-    }
-
-    function sendToPool(uint _amount) external {}
-
-    function returnFromPool(uint _amount) external {}
 }

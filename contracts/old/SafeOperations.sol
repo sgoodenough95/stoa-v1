@@ -62,7 +62,7 @@ contract SafeOperations is ReentrancyGuard, Common {
 
     mapping(address => uint) public originationFeesCollected;   // X
 
-    uint public minBorrow = 2_000 * 10 ** 18; // tokens // X
+    uint public minBorrow = 50 * 10 ** 18; // tokens // X
 
     struct CacheInit {
         address owner;

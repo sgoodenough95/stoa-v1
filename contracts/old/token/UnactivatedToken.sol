@@ -3,7 +3,7 @@ pragma solidity ^0.8.17;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
-contract OldUnactivatedToken is ERC20 {
+contract UnactivatedToken is ERC20 {
 
     constructor(
         string memory _name,

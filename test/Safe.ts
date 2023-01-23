@@ -13,7 +13,7 @@ describe("Safe", function () {
         const [owner] = await ethers.getSigners();
         const MAX_UINT = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
 
-        const ActivatedToken = await ethers.getContractFactory("ActivatedToken");
+        const ActivatedToken = await ethers.getContractFactory("OldActivatedToken");
         const UnactivatedToken = await ethers.getContractFactory("UnactivatedToken");
         const TestERC20 = await ethers.getContractFactory("TestERC20");
         const TestVault = await ethers.getContractFactory("TestVault");
@@ -117,20 +117,24 @@ describe("Safe", function () {
                 treasury, USDSTaPool, ETHST, testETH, ETHSTa, ETHController
             } = await loadFixture(deployContracts);
 
-            await safeOps.openSafe(testETH.address, "100000000000000000000");
+            await safeOps.openSafe(testDAI.address, "1000000000000000000000");
 
-            const test = await safeOps.computeBorrowAllowance(ETHSTa.address, "100000000000000000000", USDST.address);
-            console.log(test);
+            const safeInit = await safeManager.getSafeInit(owner.address, 0);
+            console.log(safeInit);
 
-            await safeOps.borrow(0, USDST.address, "60000000000000000000000", true);
+            await safeOps.borrow(0, USDST.address, "400000000000000000000", true);
 
-            console.log(await safeManager.isUnderwater(owner.address, 0));
-            console.log("Max borrow: " + await safeManager.getMaxBorrow(owner.address, 0, USDST.address));
+            await safeOps.borrow(0, USDST.address, "50000000000000000000", false);
 
-            // Change ETH price from $1,500 to $500
-            await priceFeed.setPrice(ETHSTa.address, "500000000000000000000");
+            await safeOps.repay(0, "300000000000000000000");
 
-            console.log(await safeManager.isUnderwater(owner.address, 0));
+            // console.log(await safeManager.isUnderwater(owner.address, 0));
+            // console.log("Max borrow: " + await safeManager.getMaxBorrow(owner.address, 0, USDST.address));
+
+            // // Change ETH price from $1,500 to $500
+            // await priceFeed.setPrice(ETHSTa.address, "500000000000000000000");
+
+            // console.log(await safeManager.isUnderwater(owner.address, 0));
 
             // console.log(await safeManager.getSafeVal(owner.address, 0));
             // console.log(await safeManager.getSafeInit(owner.address, 0));

@@ -20,7 +20,7 @@ import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.s
 
 // import { Governable } from "../governance/Governable.sol";
 // import { Initializable } from "../utils/Initializable.sol";
-import { ActivatedToken } from "./token/ActivatedToken.sol";
+import { OldActivatedToken } from "./token/OldActivatedToken.sol";
 
 contract ActivePool is ERC4626 {
     using SafeERC20 for IERC20;
@@ -39,11 +39,11 @@ contract ActivePool is ERC4626 {
     // }
 
     function rebaseOptIn() public {
-        ActivatedToken(address(asset())).rebaseOptIn();
+        OldActivatedToken(address(asset())).rebaseOptIn();
     }
 
     function rebaseOptOut() public {
-        ActivatedToken(address(asset())).rebaseOptOut();
+        OldActivatedToken(address(asset())).rebaseOptOut();
     }
 
     /**

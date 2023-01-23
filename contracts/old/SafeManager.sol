@@ -295,22 +295,22 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
     function isUnderwater(address _owner, uint _index)
         external
         view
-        returns (bool, uint CR, uint assets)
+        returns (bool, uint CR)
     {
         address activeToken = safe[_owner][_index].activeToken;
         address debtToken = safe[_owner][_index].debtToken;
 
-        require(
-            activeToUnactiveCounterpart[activeToken] != debtToken,
-            "SafeManager: Cannot liquidate counterparts"
-        );
-        require(
-            activeToDebtTokenMCR[activeToken][debtToken] != 0,
-            "SafeManager: Invalid pair"
-        );
+        // require(
+        //     activeToUnactiveCounterpart[activeToken] != debtToken,
+        //     "SafeManager: Cannot liquidate counterparts"
+        // );
+        // require(
+        //     activeToDebtTokenMCR[activeToken][debtToken] != 0,
+        //     "SafeManager: Invalid pair"
+        // );
 
         IERC4626 activePool = IERC4626(this.getActivePool(activeToken));
-        assets = activePool.previewRedeem(safe[_owner][_index].bal);
+        uint assets = activePool.previewRedeem(safe[_owner][_index].bal);
         console.log("Safe assets: %s", assets);
         uint debt = safe[_owner][_index].debt;
 
@@ -325,8 +325,8 @@ contract SafeManager is RebaseOpt, Common, ReentrancyGuard {
             .divPrecisely(debt * debtTokenPrice).mulTruncate(10_000);
         console.log("Safe Collateralisation Ratio: %s", CR);
 
-        if (CR > MCR) return (false, CR, assets);
-        else return (true, CR, assets);
+        if (CR > MCR) return (false, CR);
+        else return (true, CR);
     }
 
     function getMaxBorrow(address _owner, uint _index, address _debtToken)

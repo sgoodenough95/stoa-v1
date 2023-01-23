@@ -4,7 +4,7 @@ async function main() {
 
     const MAX_UINT = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
 
-    const ActivatedToken = await ethers.getContractFactory("ActivatedToken");
+    const ActivatedToken = await ethers.getContractFactory("OldActivatedToken");
     const UnactivatedToken = await ethers.getContractFactory("UnactivatedToken");
     const TestERC20 = await ethers.getContractFactory("TestERC20");
     const TestVault = await ethers.getContractFactory("TestVault");
@@ -75,11 +75,11 @@ async function main() {
     await safeOps.setController(USDSTa.address, USDController.address);
     await safeOps.setController(testETH.address, ETHController.address);
     await safeOps.setController(ETHSTa.address, ETHController.address);
-    // await safeManager.setSafeOps(safeOps.address);
-    // await USDController.setSafeOps(safeOps.address);
-    // await ETHController.setSafeOps(safeOps.address);
-    // await USDController.setSafeManager(safeManager.address);
-    // await ETHController.setSafeManager(safeManager.address);
+    await safeManager.setSafeOps(safeOps.address);
+    await USDController.setSafeOps(safeOps.address);
+    await ETHController.setSafeOps(safeOps.address);
+    await USDController.setSafeManager(safeManager.address);
+    await ETHController.setSafeManager(safeManager.address);
     await safeManager.setActivePool(USDSTa.address, USDSTaPool.address);
     await safeManager.setActivePool(ETHSTa.address, ETHSTaPool.address);
     await safeManager.setUnactiveCounterpart(USDSTa.address, USDST.address);
@@ -87,7 +87,7 @@ async function main() {
     await safeManager.setActiveToDebtTokenMCR(USDSTa.address, USDST.address, "20000");
     await safeManager.setActiveToDebtTokenMCR(ETHSTa.address, ETHST.address, "20000");
     await safeManager.setActiveToDebtTokenMCR(ETHSTa.address, USDST.address, "15000");
-    // await safeManager.setPriceFeed(priceFeed.address);
+    await safeManager.setPriceFeed(priceFeed.address);
     await priceFeed.setPrice(USDSTa.address, "1000000000000000000");    // $1
     await priceFeed.setPrice(USDST.address, "1000000000000000000"); // $1
     await priceFeed.setPrice(ETHSTa.address, "1500000000000000000000");    // $1,500
