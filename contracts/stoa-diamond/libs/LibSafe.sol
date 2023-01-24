@@ -1,24 +1,39 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.7;
 
-/// @dev A Safe supports one activeToken and one unactiveToken.
-struct Safe {
-    address owner;
-    uint index;                     // Identifier for the Safe.
-    address activeToken;            // E.g., USDSTA.
-    // Might not necessarily know this when opening a Safe.
-    address debtToken;              // E.g., USDST.
-    uint bal;                       // [vaultTokens].
-    uint debt;                      // [tokens].
-    uint mintFeeApplied;            // [credits].
-    uint redemptionFeeApplied;      // [tokens],
-    uint originationFeesPaid;       // [credits].
-    SafeStatus status;
-}
+import {
+    AppStorage,
+    RefTokenParams,
+    LibAppStorage
+} from "./LibAppStorage.sol";
+import { LibTreasury } from "./LibTreasury.sol";
+import { IERC4626 } from ".././interfaces/IERC4626.sol";
+import ".././interfaces/IStoa.sol";
+import ".././interfaces/IStoaToken.sol";
 
-enum SafeStatus {
-    nonExistent,
-    active,
-    closedByOwner,
-    closedByLiquidation
+/// @title  LibSafe
+/// @author The Stoa Corporation Ltd.
+/// @notice Internal functions for managing Safes.
+library LibSafe {
+
+    /// @notice Initializes a Safe instance.
+    ///
+    /// @dev    Mint/redemption fees to come later.
+    function _initializeSafe(
+        address owner,
+        address activeToken,
+        uint256 amount
+    ) internal {
+        AppStorage storage s = LibAppStorage.diamondStorage();
+
+        uint256 index = s.currentSafeIndex[owner];
+
+        s.safe[owner][index].owner          = owner;
+        s.safe[owner][index].activeToken    = activeToken;
+        s.safe[owner][index].bal            = amount;
+        s.safe[owner][index].index          = index;
+        s.safe[owner][index].status         = 1;
+
+        s.currentSafeIndex[owner] += 1;
+    }
 }

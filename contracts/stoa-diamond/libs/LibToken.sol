@@ -11,10 +11,15 @@ import { IERC4626 } from ".././interfaces/IERC4626.sol";
 import ".././interfaces/IStoa.sol";
 import ".././interfaces/IStoaToken.sol";
 
+/// @title  LibToken
+/// @author The Stoa Corporation Ltd.
+/// @notice Internal functions for managing tokens.
 library LibToken {
 
+    /// @dev    May later move to AppStorage.
     uint256 constant BPS = 10_000;
 
+    /// @notice Wraps ERC20 into an ERC4626 token.
     function _wrap(
         address activeToken,
         uint256 amount,
@@ -29,6 +34,7 @@ library LibToken {
         shares = vault.deposit(amount, address(this), depositFrom);
     }
 
+    /// @notice Mints activeTokens from vaultTokens.
     function _mintActiveFromVault(
         address activeToken,
         uint256 shares,
@@ -56,6 +62,7 @@ library LibToken {
         IStoaToken(activeToken).mint(recipient, mintAfterFee);
     }
 
+    /// @notice Mints unactiveTokens from vaultTokens.
     function _mintUnactiveFromVault(
         address activeToken,
         uint256 shares,
@@ -92,6 +99,7 @@ library LibToken {
         s._unactiveRedemptions[msg.sender][activeToken] += mintAfterFee;
     }
 
+    /// @notice Mints unactiveTokens.
     function _mintUnactive(
         address activeToken,
         uint256 amount,
@@ -112,6 +120,7 @@ library LibToken {
         IStoaToken(refTokenParams.unactiveToken).mint(recipient, mintAfterFee);
     }
 
+    /// @notice Mints unactiveTokens plus another action.
     function _mintUnactiveDetailed(
         address activeToken,
         uint256 amount,
@@ -147,6 +156,7 @@ library LibToken {
         }
     }
 
+    /// @notice Burns activeTokens.
     function _burnActive(
         address activeToken,
         uint256 amount,
@@ -176,6 +186,7 @@ library LibToken {
         }
     }
 
+    /// @notice Burns unactiveTokens.
     function _burnUnactive(
         address activeToken,
         uint256 amount,
@@ -207,6 +218,7 @@ library LibToken {
         }
     }
 
+    /// @notice Ensures that the activeToken is enabled.
     function _ensureEnabled(
         address activeToken
     ) internal view returns (uint8) {
@@ -221,10 +233,11 @@ library LibToken {
         _checkVaultTokenEnabled(refTokenParams.vaultToken);
         _checkUnderlyingTokenEnabled(refTokenParams.underlyingToken);
 
-        // _checkLoss(yieldToken);
+        // _checkLoss(yieldToken);  Commented out for now, but left for reference.
         return 1;
     }
 
+    /// @notice Ensures that the vaultToken is enabled.
     function _checkVaultTokenEnabled(address vaultToken) internal view {
         AppStorage storage s = LibAppStorage.diamondStorage();
         if (s._vaultTokens[vaultToken].enabled != 1) {
@@ -232,6 +245,7 @@ library LibToken {
         }
     }
 
+    /// @notice Ensures that the underlyingToken is enabled.
     function _checkUnderlyingTokenEnabled(address underlyingToken) internal view {
         AppStorage storage s = LibAppStorage.diamondStorage();
         if (s._underlyingTokens[underlyingToken].enabled != 1) {
@@ -239,6 +253,7 @@ library LibToken {
         }
     }
 
+    /// @notice Enables/disables activeToken.
     function _toggleEnabledActiveToken(
         address activeToken
     ) internal returns (uint8 enabled) {
@@ -249,6 +264,7 @@ library LibToken {
         return s._refTokens[activeToken].enabled;
     }
 
+    /// @notice Enables/disables vaultToken.
     function _toggleEnabledVaultToken(
         address vaultToken
     ) internal returns (uint8 enabled) {
@@ -259,6 +275,7 @@ library LibToken {
         return s._vaultTokens[vaultToken].enabled;
     }
 
+    /// @notice Enables/disables underlyingToken.
     function _toggleEnabledUnderlyingToken(
         address underlyingToken
     ) internal returns (uint8 enabled) {
@@ -269,18 +286,21 @@ library LibToken {
         return s._underlyingTokens[underlyingToken].enabled;
     }
 
+    /// @notice Opts contract into receiving rebases.
     function _rebaseOptIn(
         address activeToken
     ) internal {
         IStoaToken(activeToken).rebaseOptIn();
     }
 
+    /// @notice Opts contract out of receiving rebases.
     function _rebaseOptOut(
         address activeToken
     ) internal {
         IStoaToken(activeToken).rebaseOptOut();
     }
 
+    /// @notice Gets total value of Stoa's share from the vault.
     function _totalValue(
         address vaultToken
     ) internal view returns (uint256 value) {
@@ -289,6 +309,7 @@ library LibToken {
         value = IERC4626(vaultToken).maxWithdraw(address(this));
     }
 
+    /// @notice Gets total value of a given amount of shares from the vault.
     function _previewRedeem(
         address vaultToken,
         uint256 shares
@@ -298,6 +319,9 @@ library LibToken {
         assets = IERC4626(vaultToken).previewRedeem(shares);
     }
 
+    /// @notice Function for computing fees.
+    ///
+    /// @dev    May amend if fees need to be callable elsewhere/limit to only mint and redemption.
     function _computeFee(
         address activeToken,
         uint256 amount,

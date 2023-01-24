@@ -4,10 +4,10 @@ pragma solidity ^0.8.0;
 import {
     AppStorage,
     RefTokenParams
-} from "../../libs/LibAppStorage.sol";
-import { LibToken } from "../../libs/LibToken.sol";
-import "../../interfaces/IStoa.sol";
-import "../../interfaces/IStoaToken.sol";
+} from "./../libs/LibAppStorage.sol";
+import { LibToken } from "./../libs/LibToken.sol";
+import "./../interfaces/IStoa.sol";
+import "./../interfaces/IStoaToken.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @title  ExchangeFacet
@@ -19,10 +19,10 @@ contract ExchangeFacet {
     function underlyingToActive(
         address activeToken,
         uint256 amount, // The amount of underlyingTokens.
-        uint256 minimumAmountOut,   // The min amount of vaultTokens issued.
+        uint256 minAmountOut,   // The min amount of vaultTokens issued.
         address depositFrom,
         address recipient
-    ) external returns (uint256 stoaTokens) {
+    ) external returns (uint256 activeAmount) {
         LibToken._ensureEnabled(activeToken);
 
         RefTokenParams memory refTokenParams = s._refTokens[activeToken];
@@ -33,17 +33,17 @@ contract ExchangeFacet {
 
         // Before depositing, the underlyingTokens must be wrapped into vaultTokens.
         uint256 shares = LibToken._wrap(activeToken, amount, depositFrom);
-        if (shares < minimumAmountOut) {
-            revert IStoaErrors.MaxSlippageExceeded(shares, minimumAmountOut);
+        if (shares < minAmountOut) {
+            revert IStoaErrors.MaxSlippageExceeded(shares, minAmountOut);
         }
 
-        stoaTokens = LibToken._mintActiveFromVault(activeToken, shares, recipient);
+        activeAmount = LibToken._mintActiveFromVault(activeToken, shares, recipient);
     }
 
     function underlyingToUnactive(
         address activeToken,
         uint256 amount, // The amount of underlyingTokens.
-        uint256 minimumAmountOut,   // The min amount of vaultTokens issued.
+        uint256 minAmountOut,   // The min amount of vaultTokens issued.
         address depositFrom,
         address recipient
     ) external returns (uint256 stoaTokens) {
@@ -57,8 +57,8 @@ contract ExchangeFacet {
 
         // Before depositing, the underlying tokens must be wrapped into yield tokens.
         uint256 shares = LibToken._wrap(activeToken, amount, depositFrom);
-        if (shares < minimumAmountOut) {
-            revert IStoaErrors.MaxSlippageExceeded(shares, minimumAmountOut);
+        if (shares < minAmountOut) {
+            revert IStoaErrors.MaxSlippageExceeded(shares, minAmountOut);
         }
 
         stoaTokens = LibToken._mintUnactiveFromVault(activeToken, shares, recipient);
@@ -131,7 +131,7 @@ contract ExchangeFacet {
     function activeToVault(
         address activeToken,
         uint256 amount,  // The amount of activeTokens.
-        uint256 minimumAmountOut,   // The min amount of vaultTokens received.
+        uint256 minAmountOut,   // The min amount of vaultTokens received.
         address withdrawFrom,
         address recipient
     ) external returns (uint256 shares) {
@@ -148,8 +148,8 @@ contract ExchangeFacet {
         SafeERC20.safeTransferFrom(IERC20(activeToken), withdrawFrom, address(this), amount);
 
         shares = LibToken._burnActive(activeToken, amount, address(0), 2);
-        if (shares < minimumAmountOut) {
-            revert IStoaErrors.MaxSlippageExceeded(shares, minimumAmountOut);
+        if (shares < minAmountOut) {
+            revert IStoaErrors.MaxSlippageExceeded(shares, minAmountOut);
         }
 
         // Transfer vaultTokens to user.
@@ -159,7 +159,7 @@ contract ExchangeFacet {
     function activeToUnderlying(
         address activeToken,
         uint256 amount, // The amount of activeTokens.
-        uint256 minimumAmountOut,
+        uint256 minAmountOut,
         address withdrawFrom,
         address recipient
     ) external returns (uint256 assets) {
@@ -176,8 +176,8 @@ contract ExchangeFacet {
 
         uint256 shares = LibToken._burnActive(activeToken, amount, recipient, 2);
         assets = LibToken._previewRedeem(refTokenParams.vaultToken, shares);
-        if (assets < minimumAmountOut) {
-            revert IStoaErrors.MaxSlippageExceeded(assets, minimumAmountOut);
+        if (assets < minAmountOut) {
+            revert IStoaErrors.MaxSlippageExceeded(assets, minAmountOut);
         }
     }
 
@@ -210,7 +210,7 @@ contract ExchangeFacet {
     function unactiveToVault(
         address activeToken,
         uint256 amount, // The amount of unactiveTokens
-        uint256 minimumAmountOut,
+        uint256 minAmountOut,
         address withdrawFrom,
         address recipient
     ) external returns (uint256 shares, uint256 assets) {
@@ -233,8 +233,8 @@ contract ExchangeFacet {
             = LibToken._burnUnactive(activeToken, amount, withdrawFrom, address(0), 0);
 
         shares = LibToken._burnActive(activeToken, assets, address(0), 2);
-        if (shares < minimumAmountOut) {
-            revert IStoaErrors.MaxSlippageExceeded(shares, minimumAmountOut);
+        if (shares < minAmountOut) {
+            revert IStoaErrors.MaxSlippageExceeded(shares, minAmountOut);
         }
 
         // Transfer vaultTokens to user.
@@ -244,7 +244,7 @@ contract ExchangeFacet {
     function unactiveToUnderlying(
         address activeToken,
         uint256 amount, // The amount of unactiveTokens
-        uint256 minimumAmountOut,   // The min amount of underlyingTokens received.
+        uint256 minAmountOut,   // The min amount of underlyingTokens received.
         address withdrawFrom,
         address recipient
     ) external returns (uint256 shares, uint256 assets) {
@@ -268,8 +268,8 @@ contract ExchangeFacet {
 
         shares = LibToken._burnActive(activeToken, assets, recipient, 2);
         assets = LibToken._previewRedeem(refTokenParams.vaultToken, shares);
-        if (assets < minimumAmountOut) {
-            revert IStoaErrors.MaxSlippageExceeded(assets, minimumAmountOut);
+        if (assets < minAmountOut) {
+            revert IStoaErrors.MaxSlippageExceeded(assets, minAmountOut);
         }
     }
 }

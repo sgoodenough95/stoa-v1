@@ -57,9 +57,35 @@ struct RefTokenParams {
     address underlyingToken;    // modifiable
     address vaultToken;         // modifiable
     address unactiveToken;      // constant
+    // 4626 that stores activeToken for all Safes
+    // (can later adapt to have multiple safeStores for a given activeToken).
+    address safeStore;
     // Limit for the amount of underlying tokens that can be deposited.
     uint256 depositLimit;
     uint8   enabled;
+}
+
+/// @dev A Safe supports one activeToken and one unactiveToken.
+struct Safe {
+    address owner;
+    uint256 index;                     // Identifier for the Safe.
+    address activeToken;            // E.g., USDSTA.
+    // Might not necessarily know this when opening a Safe.
+    address debtToken;              // E.g., USDST.
+    uint256 bal;                       // [vaultTokens].
+    uint256 debt;                      // [tokens].
+    // Fees omitted for now.
+    // uint256 mintFeeApplied;            // [credits].
+    // uint256 redemptionFeeApplied;      // [tokens],
+    // uint256 originationFeesPaid;       // [credits].
+    uint8   status;
+}
+
+enum SafeStatus {
+    nonExistent,        // 0
+    active,             // 1
+    closedByOwner,      // 2
+    closedByLiquidation // 3
 }
 
 struct AppStorage {
@@ -74,8 +100,11 @@ struct AppStorage {
     mapping(address => UnderlyingTokenParams)   _underlyingTokens;  // (I)
     mapping(address => VaultTokenParams)        _vaultTokens;   // (I)
 
-    mapping(address => uint) holderYieldAccrued;
-    mapping(address => uint) stoaYieldAccrued;  // Can add for specific token
+    mapping(address => mapping(uint256 => Safe))    safe;
+    mapping(address => uint256)                     currentSafeIndex;
+
+    mapping(address => uint256) holderYieldAccrued;
+    mapping(address => uint256) stoaYieldAccrued;  // Can add for specific token
     
     /// @notice Fees in basis points (e.g., 30 = 0.3%).
     mapping(address => uint256) mintFee;        // (I)

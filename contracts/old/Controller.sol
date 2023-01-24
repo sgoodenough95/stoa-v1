@@ -230,7 +230,7 @@ contract Controller is Ownable, RebaseOpt, Common, ReentrancyGuard {
                 );
             }
         // E.g., DAI => USDST.
-        } else {
+        } else {    /// @dev ExchangeFacet.
             // Mint backing activeTokens to Treasury.
             activeTokenContract.mint(treasury, _amount);
             console.log(
