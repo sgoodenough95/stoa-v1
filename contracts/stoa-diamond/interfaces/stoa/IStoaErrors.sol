@@ -21,4 +21,12 @@ interface IStoaErrors {
     error InsufficientClaimableReserves(uint256 amount);
 
     error MaxSlippageExceeded(uint256 amount, uint256 minimumAmountOut);
+
+    error SafeNotActive(address owner, uint256 index);
+
+    error InsufficientSafeBal(address owner, uint256 index);
+
+    error InsufficientSafeFreeBal(address owner, uint256 index);
+
+    error SafeOwnerMismatch(address owner, address caller);
 }

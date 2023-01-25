@@ -82,10 +82,12 @@ struct Safe {
 }
 
 enum SafeStatus {
-    nonExistent,        // 0
-    active,             // 1
-    closedByOwner,      // 2
-    closedByLiquidation // 3
+    nonExistent,            // 0
+    active,                 // 1
+    activeDebt,             // 2
+    closedByOwner,          // 3
+    closedByLiquidation,    // 4
+    closedByAdmin           // 5
 }
 
 struct AppStorage {
@@ -116,6 +118,9 @@ struct AppStorage {
     /// @notice Limits.
     mapping(address => uint256) minDeposit;     // (I)
     mapping(address => uint256) minWithdraw;    // (I)
+
+    /// @dev Set to 40_000 at first.
+    mapping(address => mapping(address => uint256)) CR; // Basis points.
 
     /// @notice Unused.
     ///
