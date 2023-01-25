@@ -13,6 +13,8 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 /// @title  ExchangeFacet
 /// @author The Stoa Corporation Ltd.
 /// @notice User-facing functions for exchanging tokens.
+///
+/// @dev    Keep transacting with vaultTokens for now, may later remove.
 contract ExchangeFacet {
     AppStorage internal s;
 
@@ -46,7 +48,7 @@ contract ExchangeFacet {
         uint256 minAmountOut,   // The min amount of vaultTokens issued.
         address depositFrom,
         address recipient
-    ) external returns (uint256 stoaTokens) {
+    ) external returns (uint256 unactiveAmount) {
         LibToken._ensureEnabled(activeToken);
 
         RefTokenParams memory refTokenParams = s._refTokens[activeToken];
@@ -61,51 +63,51 @@ contract ExchangeFacet {
             revert IStoaErrors.MaxSlippageExceeded(shares, minAmountOut);
         }
 
-        stoaTokens = LibToken._mintUnactiveFromVault(activeToken, shares, recipient);
+        unactiveAmount = LibToken._mintUnactiveFromVault(activeToken, shares, recipient);
     }
 
     function vaultToActive(
         address activeToken,
-        uint256 shares, // The amount of vaultTokens.
+        uint256 amount, // The amount of vaultTokens.
         address depositFrom,
         address recipient
-    ) external returns (uint256 stoaTokens) {
+    ) external returns (uint256 activeAmount) {
         LibToken._ensureEnabled(activeToken);
 
         RefTokenParams memory refTokenParams = s._refTokens[activeToken];
 
-        uint256 assets = LibToken._previewRedeem(refTokenParams.vaultToken, shares);
+        uint256 assets = LibToken._previewRedeem(refTokenParams.vaultToken, amount);
 
         // Only consider minDeposit for underlyingToken.
         if (assets < s.minDeposit[refTokenParams.underlyingToken]) {
             revert IStoaErrors.InsufficientDepositAmount(assets);
         }
 
-        SafeERC20.safeTransferFrom(IERC20(refTokenParams.vaultToken), depositFrom, address(this), shares);
+        SafeERC20.safeTransferFrom(IERC20(refTokenParams.vaultToken), depositFrom, address(this), amount);
 
-        stoaTokens = LibToken._mintActiveFromVault(activeToken, shares, recipient);
+        activeAmount = LibToken._mintActiveFromVault(activeToken, amount, recipient);
     }
 
     function vaultToUnactive(
         address activeToken,
-        uint256 shares, // The amount of vaultTokens.
+        uint256 amount, // The amount of vaultTokens.
         address depositFrom,
         address recipient
-    ) external returns (uint256 stoaTokens) {
+    ) external returns (uint256 unactiveAmount) {
         LibToken._ensureEnabled(activeToken);
 
         RefTokenParams memory refTokenParams = s._refTokens[activeToken];
 
-        uint256 assets = LibToken._previewRedeem(refTokenParams.vaultToken, shares);
+        uint256 assets = LibToken._previewRedeem(refTokenParams.vaultToken, amount);
 
         // Only consider minDeposit for underlyingToken.
         if (assets < s.minDeposit[refTokenParams.underlyingToken]) {
             revert IStoaErrors.InsufficientDepositAmount(assets);  //
         }
 
-        SafeERC20.safeTransferFrom(IERC20(refTokenParams.vaultToken), depositFrom, address(this), shares);
+        SafeERC20.safeTransferFrom(IERC20(refTokenParams.vaultToken), depositFrom, address(this), amount);
 
-        stoaTokens = LibToken._mintUnactiveFromVault(activeToken, shares, recipient);
+        unactiveAmount = LibToken._mintUnactiveFromVault(activeToken, amount, recipient);
     }
 
     function activeToUnactive(
@@ -113,7 +115,7 @@ contract ExchangeFacet {
         uint256 amount, // The amount of activeTokens.
         address depositFrom,
         address recipient
-    ) external returns (uint256 unactiveTokens) {
+    ) external returns (uint256 unactiveAmount) {
         LibToken._ensureEnabled(activeToken);
 
         RefTokenParams memory refTokenParams = s._refTokens[activeToken];
@@ -125,7 +127,7 @@ contract ExchangeFacet {
         // First, transfer activeTokens to Stoa.
         SafeERC20.safeTransferFrom(IERC20(activeToken), depositFrom, address(this), amount);
 
-        unactiveTokens = LibToken._mintUnactiveDetailed(activeToken, amount, recipient, 3, 1, 1);
+        unactiveAmount = LibToken._mintUnactiveDetailed(activeToken, amount, recipient, 3, 1, 1);
     }
 
     function activeToVault(
@@ -186,6 +188,67 @@ contract ExchangeFacet {
         uint256 amount, // The amount of unactiveTokens
         address withdrawFrom,
         address recipient
+    ) external returns (uint256 activeAmount) {
+        LibToken._ensureEnabled(activeToken);
+
+        RefTokenParams memory refTokenParams = s._refTokens[activeToken];
+
+        if (amount < s.minWithdraw[refTokenParams.underlyingToken]) {
+            revert IStoaErrors.InsufficientWithdrawAmount(amount);
+        }
+        if (amount < s.claimableUnactiveBackingReserves[activeToken]) {
+            revert IStoaErrors.InsufficientClaimableReserves(amount);
+        }
+        if (amount < s._unactiveRedemptions[msg.sender][activeToken]) {
+            revert IStoaErrors.InsufficientRedemptionAllowance(amount);
+        }
+
+        activeAmount
+            = LibToken._burnUnactive(activeToken, amount, withdrawFrom, address(0), 3);
+
+        SafeERC20.safeTransfer(IERC20(activeToken), recipient, activeAmount);
+    }
+
+    function unactiveToVault(
+        address activeToken,
+        uint256 amount, // The amount of unactiveTokens
+        uint256 minAmountOut,
+        address withdrawFrom,
+        address recipient
+    ) external returns (uint256 shares) {
+        LibToken._ensureEnabled(activeToken);
+
+        RefTokenParams memory refTokenParams = s._refTokens[activeToken];
+
+        if (amount < s.minWithdraw[refTokenParams.underlyingToken]) {
+            revert IStoaErrors.InsufficientWithdrawAmount(amount);
+        }
+        if (amount < s.claimableUnactiveBackingReserves[activeToken]) {
+            revert IStoaErrors.InsufficientClaimableReserves(amount);
+        }
+        if (amount < s._unactiveRedemptions[msg.sender][activeToken]) {
+            revert IStoaErrors.InsufficientRedemptionAllowance(amount);
+        }
+
+        // Apply redemptionFee during next step, otherwise charging double fees.
+        uint256 activeAmount
+            = LibToken._burnUnactive(activeToken, amount, withdrawFrom, address(0), 0);
+
+        shares = LibToken._burnActive(activeToken, activeAmount, address(0), 2);
+        if (shares < minAmountOut) {
+            revert IStoaErrors.MaxSlippageExceeded(shares, minAmountOut);
+        }
+
+        // Transfer vaultTokens to user.
+        SafeERC20.safeTransfer(IERC20(refTokenParams.vaultToken), recipient, shares);
+    }
+
+    function unactiveToUnderlying(
+        address activeToken,
+        uint256 amount, // The amount of unactiveTokens
+        uint256 minAmountOut,   // The min amount of underlyingTokens received.
+        address withdrawFrom,
+        address recipient
     ) external returns (uint256 assets) {
         LibToken._ensureEnabled(activeToken);
 
@@ -201,72 +264,11 @@ contract ExchangeFacet {
             revert IStoaErrors.InsufficientRedemptionAllowance(amount);
         }
 
-        (, assets)
-            = LibToken._burnUnactive(activeToken, amount, withdrawFrom, address(0), 3);
-
-        SafeERC20.safeTransfer(IERC20(activeToken), recipient, assets);
-    }
-
-    function unactiveToVault(
-        address activeToken,
-        uint256 amount, // The amount of unactiveTokens
-        uint256 minAmountOut,
-        address withdrawFrom,
-        address recipient
-    ) external returns (uint256 shares, uint256 assets) {
-        LibToken._ensureEnabled(activeToken);
-
-        RefTokenParams memory refTokenParams = s._refTokens[activeToken];
-
-        if (amount < s.minWithdraw[refTokenParams.underlyingToken]) {
-            revert IStoaErrors.InsufficientWithdrawAmount(amount);
-        }
-        if (amount < s.claimableUnactiveBackingReserves[activeToken]) {
-            revert IStoaErrors.InsufficientClaimableReserves(amount);
-        }
-        if (amount < s._unactiveRedemptions[msg.sender][activeToken]) {
-            revert IStoaErrors.InsufficientRedemptionAllowance(amount);
-        }
-
         // Apply redemptionFee during next step, otherwise charging double fees.
-        (, assets)
+        uint256 activeAmount
             = LibToken._burnUnactive(activeToken, amount, withdrawFrom, address(0), 0);
 
-        shares = LibToken._burnActive(activeToken, assets, address(0), 2);
-        if (shares < minAmountOut) {
-            revert IStoaErrors.MaxSlippageExceeded(shares, minAmountOut);
-        }
-
-        // Transfer vaultTokens to user.
-        SafeERC20.safeTransfer(IERC20(refTokenParams.vaultToken), recipient, shares);
-    }
-
-    function unactiveToUnderlying(
-        address activeToken,
-        uint256 amount, // The amount of unactiveTokens
-        uint256 minAmountOut,   // The min amount of underlyingTokens received.
-        address withdrawFrom,
-        address recipient
-    ) external returns (uint256 shares, uint256 assets) {
-        LibToken._ensureEnabled(activeToken);
-
-        RefTokenParams memory refTokenParams = s._refTokens[activeToken];
-
-        if (amount < s.minWithdraw[refTokenParams.underlyingToken]) {
-            revert IStoaErrors.InsufficientWithdrawAmount(amount);
-        }
-        if (amount < s.claimableUnactiveBackingReserves[activeToken]) {
-            revert IStoaErrors.InsufficientClaimableReserves(amount);
-        }
-        if (amount < s._unactiveRedemptions[msg.sender][activeToken]) {
-            revert IStoaErrors.InsufficientRedemptionAllowance(amount);
-        }
-
-        // Apply redemptionFee during next step, otherwise charging double fees.
-        (, assets)
-            = LibToken._burnUnactive(activeToken, amount, withdrawFrom, address(0), 0);
-
-        shares = LibToken._burnActive(activeToken, assets, recipient, 2);
+        uint256 shares = LibToken._burnActive(activeToken, activeAmount, recipient, 2);
         assets = LibToken._previewRedeem(refTokenParams.vaultToken, shares);
         if (assets < minAmountOut) {
             revert IStoaErrors.MaxSlippageExceeded(assets, minAmountOut);

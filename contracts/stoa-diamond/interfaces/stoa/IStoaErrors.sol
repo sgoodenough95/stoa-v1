@@ -29,4 +29,6 @@ interface IStoaErrors {
     error InsufficientSafeFreeBal(address owner, uint256 index);
 
     error SafeOwnerMismatch(address owner, address caller);
+
+    error IllegalSafeTransfer(address to, uint256 toIndex, uint256 fromIndex);
 }

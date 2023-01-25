@@ -9,9 +9,9 @@ import {
 library LibTreasury {
 
     function _adjustBackingReserve(
-        address wildToken,
-        address backingToken,
-        int     amount
+        address wildToken,      // unactiveToken (e.g., USDST).
+        address backingToken,   // activeToken (e.g., USDSTA).
+        int256  amount
     ) internal returns (int newBackingReserve) {
         AppStorage storage s = LibAppStorage.diamondStorage();
 

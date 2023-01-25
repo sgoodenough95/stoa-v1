@@ -70,7 +70,7 @@ struct Safe {
     address owner;
     uint256 index;                     // Identifier for the Safe.
     address activeToken;            // E.g., USDSTA.
-    // Might not necessarily know this when opening a Safe.
+    // Know this when opening a Safe.
     address debtToken;              // E.g., USDST.
     uint256 bal;                       // [vaultTokens].
     uint256 debt;                      // [tokens].
@@ -102,6 +102,7 @@ struct AppStorage {
     mapping(address => UnderlyingTokenParams)   _underlyingTokens;  // (I)
     mapping(address => VaultTokenParams)        _vaultTokens;   // (I)
 
+    // Owner address -> Safe ID -> Safe {}
     mapping(address => mapping(uint256 => Safe))    safe;
     mapping(address => uint256)                     currentSafeIndex;
 
@@ -120,6 +121,7 @@ struct AppStorage {
     mapping(address => uint256) minWithdraw;    // (I)
 
     /// @dev Set to 40_000 at first.
+    // activeToken -> debtToken -> Collateralization Ratio (basis points).
     mapping(address => mapping(address => uint256)) CR; // Basis points.
 
     /// @notice Unused.

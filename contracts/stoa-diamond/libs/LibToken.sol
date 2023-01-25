@@ -29,31 +29,27 @@ library LibToken {
 
         RefTokenParams memory refTokenParams = s._refTokens[activeToken];
 
-        IERC4626 vault = IERC4626(refTokenParams.vaultToken);
-
-        shares = vault.deposit(amount, address(this), depositFrom);
+        shares = IERC4626(refTokenParams.vaultToken).deposit(amount, address(this), depositFrom);
     }
 
     /// @notice Mints activeTokens from vaultTokens.
     function _mintActiveFromVault(
         address activeToken,
-        uint256 shares,
+        uint256 amount,
         address recipient
-    ) internal returns (uint256 stoaTokens) {
+    ) internal returns (uint256 activeAmount) {
         AppStorage storage s = LibAppStorage.diamondStorage();
 
         RefTokenParams memory refTokenParams = s._refTokens[activeToken];
 
-        IERC4626 vault = IERC4626(refTokenParams.vaultToken);
-
-        stoaTokens = vault.previewRedeem(shares);
+        activeAmount = IERC4626(refTokenParams.vaultToken).previewRedeem(amount);
 
         uint256 mintFee         = _computeFee(
             activeToken,
-            stoaTokens,
+            activeAmount,
             1
         );
-        uint256 mintAfterFee    = stoaTokens - mintFee;
+        uint256 mintAfterFee    = activeAmount - mintFee;
 
         // Stoa captures mintFee amount of activeTokens if available.
         if (mintFee > 0) {
@@ -65,32 +61,30 @@ library LibToken {
     /// @notice Mints unactiveTokens from vaultTokens.
     function _mintUnactiveFromVault(
         address activeToken,
-        uint256 shares,
+        uint256 amount,
         address recipient
-    ) internal returns (uint256 stoaTokens) {
+    ) internal returns (uint256 mintAfterFee) {
         AppStorage storage s = LibAppStorage.diamondStorage();
 
         RefTokenParams memory refTokenParams = s._refTokens[activeToken];
 
-        IERC4626 vault = IERC4626(refTokenParams.vaultToken);
-
-        stoaTokens = vault.previewRedeem(shares);
+        uint256 unactiveAmount = IERC4626(refTokenParams.vaultToken).previewRedeem(amount);
 
         uint256 mintFee         = _computeFee(
             activeToken,
-            stoaTokens,
+            unactiveAmount,
             1
         );
-        uint256 mintAfterFee    = stoaTokens - mintFee;
+        mintAfterFee            = unactiveAmount - mintFee;
 
         // First, mint activeTokens to Stoa to serve as backing.
-        IStoaToken(activeToken).mint(address(this), stoaTokens);
+        IStoaToken(activeToken).mint(address(this), unactiveAmount);
 
         // Update backing reserve. Stoa captures mintFee amount of activeTokens.
         LibTreasury._adjustBackingReserve(
             refTokenParams.unactiveToken,
             activeToken,
-            int(mintAfterFee)
+            int256(mintAfterFee)
         );
 
         IStoaToken(refTokenParams.unactiveToken).mint(recipient, mintAfterFee);
@@ -169,12 +163,12 @@ library LibToken {
 
         IERC4626 vault = IERC4626(refTokenParams.vaultToken);
 
-        uint256 fee       = _computeFee(
+        uint256 fee             = _computeFee(
             activeToken,
             amount,
             feeType
         );
-        uint256 burnAfterFee  = amount - fee;
+        uint256 burnAfterFee    = amount - fee;
 
         // Stoa captures fee amount of activeTokens.
         IStoaToken(activeToken).burn(address(this), burnAfterFee);
@@ -193,25 +187,25 @@ library LibToken {
         address withdrawFrom,
         address recipient,  // Only if requesting underlyingToken.
         uint8   feeType
-    ) internal returns (uint256 shares, uint256 burnAfterFee) {
+    ) internal returns (uint256 activeAmount) {
         AppStorage storage s = LibAppStorage.diamondStorage();
 
         RefTokenParams memory refTokenParams = s._refTokens[activeToken];
 
         IERC4626 vault = IERC4626(refTokenParams.vaultToken);
 
-        uint256 fee       = _computeFee(
+        uint256 fee         = _computeFee(
             activeToken,
             amount,
             feeType
         );
-        burnAfterFee  = amount - fee;
+        activeAmount        = amount - fee;
 
         IStoaToken(activeToken).burn(withdrawFrom, amount);
 
-        s._unactiveRedemptions[msg.sender][activeToken] -= burnAfterFee;
+        s._unactiveRedemptions[msg.sender][activeToken] -= activeAmount;
 
-        shares = vault.convertToShares(burnAfterFee);
+        uint256 shares = vault.convertToShares(activeAmount);
 
         if (recipient != address(0)) {
             vault.redeem(shares, recipient, address(this));

@@ -72,6 +72,7 @@ library LibSafe {
         if (s.safe[owner][index].status != 1 || s.safe[owner][index].status != 2) {
             revert IStoaErrors.SafeNotActive(owner, index);
         }
+        // Does not account for an event where amount = 0, as this will never execute.
         if (amount > 0) {
             s.safe[owner][index].bal += _amount;
         } else {
@@ -135,7 +136,7 @@ library LibSafe {
         s.safe[owner][index].status = closedBy;
     }
 
-    /// @dev    Returns the free amount of assets (not shares).
+    /// @dev    Returns the free amount of activeTokens (not Safe shares).
     function _getWithdrawAllowance(
         address owner,
         uint256 index
